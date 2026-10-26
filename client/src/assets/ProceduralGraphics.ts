@@ -1,0 +1,394 @@
+import Phaser from 'phaser';
+import { COLORS } from '@shared/constants';
+
+export class ProceduralGraphics {
+  public static generateAll(scene: Phaser.Scene): void {
+    this.createStationTiles(scene);
+    this.createCharacterSprites(scene);
+    this.createConsolesAndVents(scene);
+    this.createEmergencyTable(scene);
+    this.createFrostOverlayTexture(scene);
+  }
+
+  /**
+   * Floor, wall, and corridor procedural tiles
+   */
+  private static createStationTiles(scene: Phaser.Scene): void {
+    // 1. Metal Floor Tile (64x64)
+    if (!scene.textures.exists('tile_floor')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d')!;
+
+      // Dark metallic base
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(0, 0, 64, 64);
+
+      // Plate borders
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(1, 1, 62, 62);
+
+      // Rivets in corners
+      ctx.fillStyle = '#475569';
+      const rivets = [[6, 6], [58, 6], [6, 58], [58, 58]];
+      rivets.forEach(([rx, ry]) => {
+        ctx.beginPath();
+        ctx.arc(rx, ry, 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Subtle frost speckles
+      ctx.fillStyle = 'rgba(224, 242, 254, 0.15)';
+      ctx.fillRect(14, 18, 6, 2);
+      ctx.fillRect(40, 42, 4, 3);
+      ctx.fillRect(28, 32, 3, 2);
+
+      scene.textures.addCanvas('tile_floor', canvas);
+    }
+
+    // 2. Wall Bulkhead Tile (64x64)
+    if (!scene.textures.exists('tile_wall')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d')!;
+
+      // Outer heavy metal
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, 64, 64);
+
+      // Reinforced bevel
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(4, 4, 56, 56);
+
+      // Icy structural rib
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(10, 8, 44, 48);
+
+      // Ice crystal edge
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 64);
+      ctx.lineTo(64, 64);
+      ctx.stroke();
+
+      scene.textures.addCanvas('tile_wall', canvas);
+    }
+
+    // 3. Corridor Tile (64x64)
+    if (!scene.textures.exists('tile_corridor')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d')!;
+
+      ctx.fillStyle = '#182030';
+      ctx.fillRect(0, 0, 64, 64);
+
+      // Grid line
+      ctx.strokeStyle = '#27354a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0, 0, 64, 64);
+
+      // Hazard striping along middle
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.08)';
+      ctx.fillRect(24, 0, 16, 64);
+
+      scene.textures.addCanvas('tile_corridor', canvas);
+    }
+  }
+
+  /**
+   * Procedural astronaut scientist characters and dead body textures
+   */
+  private static createCharacterSprites(scene: Phaser.Scene): void {
+    COLORS.forEach(c => {
+      // 1. Alive Scientist Sprite (48x48)
+      const key = `player_${c.key}`;
+      if (!scene.textures.exists(key)) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 48;
+        canvas.height = 48;
+        const ctx = canvas.getContext('2d')!;
+
+        // Backpack (Oxygen/Thermal Tank) on left side
+        ctx.fillStyle = c.darkHex;
+        ctx.beginPath();
+        ctx.roundRect(4, 15, 8, 20, 3);
+        ctx.fill();
+
+        // Suit Body
+        ctx.fillStyle = c.hex;
+        ctx.beginPath();
+        ctx.ellipse(24, 24, 15, 17, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Shading on lower suit
+        ctx.fillStyle = c.darkHex;
+        ctx.beginPath();
+        ctx.ellipse(24, 32, 13, 8, 0, 0, Math.PI);
+        ctx.fill();
+
+        // Left and Right Legs/Boots
+        ctx.fillStyle = c.darkHex;
+        ctx.beginPath();
+        ctx.roundRect(14, 37, 8, 8, 3);
+        ctx.roundRect(26, 37, 8, 8, 3);
+        ctx.fill();
+
+        // Helmet Visor (Cyan glossy reflective glass)
+        ctx.fillStyle = '#082f49';
+        ctx.beginPath();
+        ctx.roundRect(22, 13, 16, 12, 5);
+        ctx.fill();
+
+        // Visor glass sheen
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.roundRect(24, 14, 13, 9, 4);
+        ctx.fill();
+
+        // Visor reflection streak
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.ellipse(31, 16, 5, 2, -Math.PI / 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        scene.textures.addCanvas(key, canvas);
+      }
+
+      // 2. Dead Body Sprite (48x48)
+      const deadKey = `dead_${c.key}`;
+      if (!scene.textures.exists(deadKey)) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 48;
+        canvas.height = 48;
+        const ctx = canvas.getContext('2d')!;
+
+        // Broken suit base with ice crystals
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.4)';
+        ctx.beginPath();
+        ctx.ellipse(24, 36, 20, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Fallen torso
+        ctx.fillStyle = c.hex;
+        ctx.beginPath();
+        ctx.ellipse(24, 28, 16, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Broken suit bone / thermal conduit sticking out
+        ctx.fillStyle = '#f8fafc';
+        ctx.beginPath();
+        ctx.roundRect(21, 12, 6, 14, 2);
+        ctx.fill();
+
+        // Broken visor glass shards
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.moveTo(30, 24);
+        ctx.lineTo(38, 20);
+        ctx.lineTo(36, 28);
+        ctx.closePath();
+        ctx.fill();
+
+        scene.textures.addCanvas(deadKey, canvas);
+      }
+    });
+
+    // Ghost texture (cyan glowing translucent silhouette)
+    if (!scene.textures.exists('player_ghost')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 48;
+      canvas.height = 48;
+      const ctx = canvas.getContext('2d')!;
+
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.55)';
+      ctx.beginPath();
+      ctx.arc(24, 18, 14, Math.PI, 0, false);
+      ctx.lineTo(38, 38);
+      // Wavy ghost tail
+      ctx.quadraticCurveTo(31, 33, 24, 38);
+      ctx.quadraticCurveTo(17, 33, 10, 38);
+      ctx.closePath();
+      ctx.fill();
+
+      // Hollow glow eyes
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(20, 18, 3, 0, Math.PI * 2);
+      ctx.arc(28, 18, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      scene.textures.addCanvas('player_ghost', canvas);
+    }
+  }
+
+  /**
+   * Consoles, vents, and stations
+   */
+  private static createConsolesAndVents(scene: Phaser.Scene): void {
+    // 1. Task Console (48x48)
+    if (!scene.textures.exists('console_task')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 48;
+      canvas.height = 48;
+      const ctx = canvas.getContext('2d')!;
+
+      // Stand
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(8, 16, 32, 28);
+
+      // Angled monitor
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(10, 8, 28, 20);
+
+      // Glowing screen
+      ctx.fillStyle = '#0284c7';
+      ctx.fillRect(12, 10, 24, 16);
+
+      // Animated screen line
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(14, 14, 12, 2);
+      ctx.fillRect(14, 19, 18, 2);
+
+      // Yellow indicator LED
+      ctx.fillStyle = '#facc15';
+      ctx.beginPath();
+      ctx.arc(32, 34, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      scene.textures.addCanvas('console_task', canvas);
+    }
+
+    // 2. Vent Grate (48x48)
+    if (!scene.textures.exists('vent_grate')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 48;
+      canvas.height = 48;
+      const ctx = canvas.getContext('2d')!;
+
+      // Frame
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(4, 8, 40, 32);
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(4, 8, 40, 32);
+
+      // Cold vent glow
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
+      ctx.fillRect(8, 12, 32, 24);
+
+      // Grate slats
+      ctx.fillStyle = '#020617';
+      for (let y = 14; y < 36; y += 5) {
+        ctx.fillRect(8, y, 32, 2);
+      }
+
+      scene.textures.addCanvas('vent_grate', canvas);
+    }
+  }
+
+  /**
+   * Emergency Meeting Table (130x130)
+   */
+  private static createEmergencyTable(scene: Phaser.Scene): void {
+    if (!scene.textures.exists('table_emergency')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 130;
+      canvas.height = 130;
+      const ctx = canvas.getContext('2d')!;
+
+      // Outer table border
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.arc(65, 65, 62, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Metallic rim
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Table inner surface
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.arc(65, 65, 52, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Hazard striped ring
+      ctx.strokeStyle = '#ca8a04';
+      ctx.setLineDash([8, 8]);
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(65, 65, 34, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Central Emergency Button base
+      ctx.fillStyle = '#450a0a';
+      ctx.beginPath();
+      ctx.arc(65, 65, 22, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Glowing Red Button
+      const grad = ctx.createRadialGradient(65, 65, 2, 65, 65, 18);
+      grad.addColorStop(0, '#f87171');
+      grad.addColorStop(0.7, '#dc2626');
+      grad.addColorStop(1, '#991b1b');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(65, 65, 18, 0, Math.PI * 2);
+      ctx.fill();
+
+      scene.textures.addCanvas('table_emergency', canvas);
+    }
+  }
+
+  /**
+   * Screen frost vignette texture for sabotage & temperature drop
+   */
+  private static createFrostOverlayTexture(scene: Phaser.Scene): void {
+    if (!scene.textures.exists('frost_vignette')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d')!;
+
+      const grad = ctx.createRadialGradient(256, 256, 120, 256, 256, 256);
+      grad.addColorStop(0, 'rgba(186, 230, 253, 0)');
+      grad.addColorStop(0.7, 'rgba(125, 211, 252, 0.25)');
+      grad.addColorStop(1, 'rgba(56, 189, 248, 0.7)');
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 512, 512);
+
+      // Draw jagged ice spires along corners
+      ctx.fillStyle = 'rgba(240, 249, 255, 0.8)';
+      const drawSpike = (x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) => {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.lineTo(x3, y3);
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      // Top-left spikes
+      drawSpike(0, 0, 60, 0, 0, 70);
+      drawSpike(0, 40, 80, 10, 10, 80);
+      // Top-right spikes
+      drawSpike(512, 0, 452, 0, 512, 70);
+      drawSpike(512, 40, 432, 10, 502, 80);
+      // Bottom-left spikes
+      drawSpike(0, 512, 60, 512, 0, 442);
+      // Bottom-right spikes
+      drawSpike(512, 512, 452, 512, 512, 442);
+
+      scene.textures.addCanvas('frost_vignette', canvas);
+    }
+  }
+}
