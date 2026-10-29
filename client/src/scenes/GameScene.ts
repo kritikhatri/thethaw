@@ -127,6 +127,20 @@ export class GameScene extends Phaser.Scene {
 
     this.fogMaskGraphics = this.make.graphics({ x: 0, y: 0 });
 
+    // Drifting snow, pinned to the screen so it falls wherever the camera is
+    const snow = this.add.particles(0, 0, 'snowflake', {
+      x: { min: 0, max: this.scale.width },
+      y: -10,
+      lifespan: 9000,
+      speedY: { min: 20, max: 55 },
+      speedX: { min: -15, max: 15 },
+      scale: { min: 0.4, max: 1.2 },
+      alpha: { start: 0.7, end: 0 },
+      frequency: 90
+    });
+    snow.setScrollFactor(0);
+    snow.setDepth(45);
+
     // Frosting/Thawing Overlay
     this.frostVignette = this.add.image(0, 0, 'frost_vignette');
     this.frostVignette.setScrollFactor(0);
@@ -229,10 +243,22 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // Walls
+      // Ambient ceiling light pooled in the middle of each room
+      const roomLight = this.add.image(r.x + r.width / 2, r.y + r.height / 2, 'soft_glow');
+      roomLight.setDisplaySize(r.width * 0.9, r.height * 0.9);
+      roomLight.setTint(0x7dd3fc);
+      roomLight.setAlpha(0.18);
+      roomLight.setBlendMode(Phaser.BlendModes.ADD);
+      roomLight.setDepth(3);
+
+      // Walls: wide faint stroke for the glow, then a crisp core line
       const wallG = this.add.graphics();
       wallG.setDepth(5);
-      wallG.lineStyle(6, 0x38bdf8, 0.9);
+      wallG.lineStyle(16, 0x38bdf8, 0.12);
+      wallG.strokeRect(r.x, r.y, r.width, r.height);
+      wallG.lineStyle(8, 0x0b1220, 1);
+      wallG.strokeRect(r.x, r.y, r.width, r.height);
+      wallG.lineStyle(3, 0x7dd3fc, 0.95);
       wallG.strokeRect(r.x, r.y, r.width, r.height);
 
       // Room Name Header
@@ -250,6 +276,21 @@ export class GameScene extends Phaser.Scene {
 
     // 4. Task Consoles
     for (const tc of TASK_CONSOLES) {
+      const consoleGlow = this.add.image(tc.x, tc.y, 'soft_glow');
+      consoleGlow.setDisplaySize(90, 90);
+      consoleGlow.setTint(0x38bdf8);
+      consoleGlow.setBlendMode(Phaser.BlendModes.ADD);
+      consoleGlow.setDepth(9);
+      this.tweens.add({
+        targets: consoleGlow,
+        alpha: { from: 0.25, to: 0.7 },
+        duration: 1400,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+        delay: Math.random() * 1400
+      });
+
       const consoleSprite = this.add.image(tc.x, tc.y, 'console_task');
       consoleSprite.setDepth(10);
 
@@ -430,17 +471,19 @@ export class GameScene extends Phaser.Scene {
         const container = this.add.container(p.x, p.y);
         container.setDepth(20);
 
+        const shadow = this.add.ellipse(0, 22, 30, 8, 0x000000, 0.4);
         const sprite = this.add.sprite(0, 0, `player_${p.colorKey}`);
         const nameText = this.add.text(0, -32, p.name, {
-          fontFamily: 'monospace',
-          fontSize: '11px',
+          fontFamily: '"Exo 2", sans-serif',
+          fontSize: '12px',
+          fontStyle: 'bold',
           color: '#ffffff',
           stroke: '#000000',
           strokeThickness: 3
         });
         nameText.setOrigin(0.5);
 
-        container.add([sprite, nameText]);
+        container.add([shadow, sprite, nameText]);
         visual = { container, sprite, nameText, targetX: p.x, targetY: p.y };
         this.playerVisuals.set(id, visual);
       }

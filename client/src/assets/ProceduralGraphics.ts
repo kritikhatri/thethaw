@@ -8,6 +8,38 @@ export class ProceduralGraphics {
     this.createConsolesAndVents(scene);
     this.createEmergencyTable(scene);
     this.createFrostOverlayTexture(scene);
+    this.createAtmosphereTextures(scene);
+  }
+
+  /**
+   * Snowflake particle and soft glow used for ambient effects
+   */
+  private static createAtmosphereTextures(scene: Phaser.Scene): void {
+    if (!scene.textures.exists('snowflake')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 8;
+      canvas.height = 8;
+      const ctx = canvas.getContext('2d')!;
+      const grad = ctx.createRadialGradient(4, 4, 0, 4, 4, 4);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      grad.addColorStop(1, 'rgba(224, 242, 254, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 8, 8);
+      scene.textures.addCanvas('snowflake', canvas);
+    }
+
+    if (!scene.textures.exists('soft_glow')) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d')!;
+      const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
+      grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 128, 128);
+      scene.textures.addCanvas('soft_glow', canvas);
+    }
   }
 
   /**
@@ -21,14 +53,25 @@ export class ProceduralGraphics {
       canvas.height = 64;
       const ctx = canvas.getContext('2d')!;
 
-      // Dark metallic base
-      ctx.fillStyle = '#1e293b';
+      // Dark metallic base with soft diagonal sheen
+      const floorGrad = ctx.createLinearGradient(0, 0, 64, 64);
+      floorGrad.addColorStop(0, '#243247');
+      floorGrad.addColorStop(1, '#1a2536');
+      ctx.fillStyle = floorGrad;
       ctx.fillRect(0, 0, 64, 64);
 
-      // Plate borders
-      ctx.strokeStyle = '#334155';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(1, 1, 62, 62);
+      // Plate borders: light top-left edge, dark bottom-right edge for bevel
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.18)';
+      ctx.fillRect(0, 0, 64, 1);
+      ctx.fillRect(0, 0, 1, 64);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.6)';
+      ctx.fillRect(0, 63, 64, 1);
+      ctx.fillRect(63, 0, 1, 64);
+
+      // Center seam splitting the tile into four plates
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.35)';
+      ctx.fillRect(31, 0, 1, 64);
+      ctx.fillRect(0, 31, 64, 1);
 
       // Rivets in corners
       ctx.fillStyle = '#475569';
@@ -114,47 +157,58 @@ export class ProceduralGraphics {
         canvas.height = 48;
         const ctx = canvas.getContext('2d')!;
 
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = '#020617';
+        ctx.lineJoin = 'round';
+
         // Backpack (Oxygen/Thermal Tank) on left side
         ctx.fillStyle = c.darkHex;
         ctx.beginPath();
-        ctx.roundRect(4, 15, 8, 20, 3);
+        ctx.roundRect(3, 16, 10, 19, 4);
         ctx.fill();
+        ctx.stroke();
 
-        // Suit Body
-        ctx.fillStyle = c.hex;
+        // Boots (drawn before body so the body overlaps them)
         ctx.beginPath();
-        ctx.ellipse(24, 24, 15, 17, 0, 0, Math.PI * 2);
+        ctx.roundRect(13, 34, 9, 11, 4);
+        ctx.roundRect(26, 34, 9, 11, 4);
         ctx.fill();
+        ctx.stroke();
 
-        // Shading on lower suit
-        ctx.fillStyle = c.darkHex;
+        // Suit body with rounded-capsule shape and vertical shading
+        const bodyGrad = ctx.createLinearGradient(10, 6, 38, 40);
+        bodyGrad.addColorStop(0, c.hex);
+        bodyGrad.addColorStop(1, c.darkHex);
+        ctx.fillStyle = bodyGrad;
         ctx.beginPath();
-        ctx.ellipse(24, 32, 13, 8, 0, 0, Math.PI);
+        ctx.roundRect(9, 6, 30, 34, [15, 15, 8, 8]);
         ctx.fill();
+        ctx.stroke();
 
-        // Left and Right Legs/Boots
-        ctx.fillStyle = c.darkHex;
+        // Rim highlight on the body
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.roundRect(14, 37, 8, 8, 3);
-        ctx.roundRect(26, 37, 8, 8, 3);
-        ctx.fill();
+        ctx.arc(22, 20, 10, Math.PI * 1.1, Math.PI * 1.45);
+        ctx.stroke();
 
-        // Helmet Visor (Cyan glossy reflective glass)
-        ctx.fillStyle = '#082f49';
+        // Helmet visor (frosted glass)
+        const visorGrad = ctx.createLinearGradient(22, 11, 40, 25);
+        visorGrad.addColorStop(0, '#bae6fd');
+        visorGrad.addColorStop(0.5, '#38bdf8');
+        visorGrad.addColorStop(1, '#0c4a6e');
+        ctx.fillStyle = visorGrad;
+        ctx.strokeStyle = '#020617';
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.roundRect(22, 13, 16, 12, 5);
+        ctx.roundRect(21, 11, 19, 13, 6);
         ctx.fill();
-
-        // Visor glass sheen
-        ctx.fillStyle = '#38bdf8';
-        ctx.beginPath();
-        ctx.roundRect(24, 14, 13, 9, 4);
-        ctx.fill();
+        ctx.stroke();
 
         // Visor reflection streak
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         ctx.beginPath();
-        ctx.ellipse(31, 16, 5, 2, -Math.PI / 6, 0, Math.PI * 2);
+        ctx.ellipse(32, 14.5, 5, 1.8, 0, 0, Math.PI * 2);
         ctx.fill();
 
         scene.textures.addCanvas(key, canvas);
@@ -238,16 +292,28 @@ export class ProceduralGraphics {
       canvas.height = 48;
       const ctx = canvas.getContext('2d')!;
 
+      // Screen glow halo
+      ctx.shadowColor = '#38bdf8';
+      ctx.shadowBlur = 10;
+
       // Stand
       ctx.fillStyle = '#334155';
-      ctx.fillRect(8, 16, 32, 28);
+      ctx.beginPath();
+      ctx.roundRect(8, 16, 32, 28, 4);
+      ctx.fill();
+      ctx.shadowBlur = 0;
 
       // Angled monitor
       ctx.fillStyle = '#0f172a';
-      ctx.fillRect(10, 8, 28, 20);
+      ctx.beginPath();
+      ctx.roundRect(10, 8, 28, 20, 3);
+      ctx.fill();
 
       // Glowing screen
-      ctx.fillStyle = '#0284c7';
+      const screenGrad = ctx.createLinearGradient(12, 10, 12, 26);
+      screenGrad.addColorStop(0, '#0ea5e9');
+      screenGrad.addColorStop(1, '#075985');
+      ctx.fillStyle = screenGrad;
       ctx.fillRect(12, 10, 24, 16);
 
       // Animated screen line
