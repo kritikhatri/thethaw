@@ -778,7 +778,7 @@ export class GameScene extends Phaser.Scene {
     this.isModalOpen = true;
 
     SabotageModal.open(
-      uiLayer,
+      modalLayer,
       this.latestSnapshot?.sabotage.timeLeft || 0,
       this.latestSnapshot?.sabotage.active !== null,
       (type) => this.socket.emit(SOCKET_EVENTS.TRIGGER_SABOTAGE, { type }),
