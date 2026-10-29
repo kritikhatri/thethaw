@@ -1,188 +1,122 @@
-import { GameStateSnapshot, PlayerTask, Role } from '@shared/types';
+import { GameStateSnapshot, PlayerPublic } from '@shared/types';
 import { ROOMS, MAP_WIDTH, MAP_HEIGHT } from '@shared/constants';
 
-export interface HudCallbacks {
-  onUse: () => void;
-  onReport: () => void;
-  onKill: () => void;
-  onSabotage: () => void;
-  onVent: () => void;
-}
+const PANEL = 'background:rgba(15, 23, 42, 0.85); backdrop-filter:blur(6px); border:1px solid #334155; border-radius:12px;';
 
 export class HudOverlay {
   private container: HTMLElement;
   private minimapCanvas: HTMLCanvasElement;
   private minimapCtx: CanvasRenderingContext2D;
+  private timerEl: HTMLElement;
+  private rosterEl: HTMLElement;
+  private roleEl: HTMLElement;
+  private bannerEl: HTMLElement;
+  private bannerTimeout: number | null = null;
 
-  private useBtn: HTMLButtonElement | null = null;
-  private reportBtn: HTMLButtonElement | null = null;
-  private killBtn: HTMLButtonElement | null = null;
-  private sabotageBtn: HTMLButtonElement | null = null;
-  private ventBtn: HTMLButtonElement | null = null;
-  private progressBar: HTMLElement | null = null;
-  private taskListEl: HTMLElement | null = null;
-
-  constructor(container: HTMLElement, callbacks: HudCallbacks) {
+  constructor(container: HTMLElement) {
     this.container = container;
     this.container.innerHTML = `
-      <!-- Top Left: Task Progress & List -->
-      <div style="position:absolute; top:16px; left:16px; width:300px; display:flex; flex-direction:column; gap:8px; pointer-events:none; z-index:30;">
-        <div style="background:rgba(15, 23, 42, 0.85); backdrop-filter:blur(4px); border:1px solid #334155; border-radius:8px; padding:10px;">
-          <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:bold; color:#94a3b8; margin-bottom:4px; letter-spacing:0.5px;">
-            <span>STATION SYSTEM INTEGRITY</span>
-            <span id="task-pct">0%</span>
-          </div>
-          <div style="width:100%; height:12px; background:#020617; border-radius:6px; overflow:hidden; border:1px solid #1e293b;">
-            <div id="hud-progress-bar" style="width:0%; height:100%; background:linear-gradient(90deg, #0284c7, #22c55e); transition:width 0.3s ease;"></div>
-          </div>
-        </div>
+      <!-- Top Center: Round Timer -->
+      <div style="position:absolute; top:16px; left:50%; transform:translateX(-50%); ${PANEL} padding:8px 22px; text-align:center; pointer-events:none; z-index:30;">
+        <div style="font-size:10px; font-weight:700; color:#94a3b8; letter-spacing:2px;">TIME TO SURVIVE</div>
+        <div id="hud-timer" style="font-family:Orbitron, monospace; font-size:30px; font-weight:800; color:#e0f2fe;">2:00</div>
+      </div>
 
-        <div id="hud-task-list" style="background:rgba(15, 23, 42, 0.85); backdrop-filter:blur(4px); border:1px solid #334155; border-radius:8px; padding:10px; font-size:12px; color:#f8fafc; display:flex; flex-direction:column; gap:6px;">
-        </div>
+      <!-- Top Left: Role + Roster -->
+      <div style="position:absolute; top:16px; left:16px; width:240px; display:flex; flex-direction:column; gap:8px; pointer-events:none; z-index:30;">
+        <div id="hud-role" style="${PANEL} padding:12px;"></div>
+        <div id="hud-roster" style="${PANEL} padding:10px; display:flex; flex-direction:column; gap:5px; font-size:12px;"></div>
       </div>
 
       <!-- Top Right: Minimap Radar -->
-      <div style="position:absolute; top:16px; right:16px; width:180px; height:135px; background:rgba(15, 23, 42, 0.85); backdrop-filter:blur(4px); border:2px solid #38bdf8; border-radius:8px; overflow:hidden; pointer-events:none; z-index:30; box-shadow:0 0 15px rgba(56, 189, 248, 0.2);">
+      <div style="position:absolute; top:16px; right:16px; width:180px; height:135px; ${PANEL} border:2px solid #38bdf8; overflow:hidden; pointer-events:none; z-index:30; box-shadow:0 0 15px rgba(56, 189, 248, 0.2);">
         <canvas id="hud-minimap" width="180" height="135"></canvas>
       </div>
 
-      <!-- Bottom Right: Action Buttons -->
-      <div style="position:absolute; bottom:20px; right:20px; display:flex; gap:12px; pointer-events:auto; z-index:30;">
-        <button id="btn-vent" style="display:none; width:70px; height:70px; border-radius:50%; background:#0f172a; border:2px solid #38bdf8; color:#38bdf8; font-weight:bold; font-size:12px; cursor:pointer; box-shadow:0 0 12px rgba(56, 189, 248, 0.4);">
-          VENT
-        </button>
-        <button id="btn-sabotage" style="display:none; width:70px; height:70px; border-radius:50%; background:#450a0a; border:2px solid #ef4444; color:#fca5a5; font-weight:bold; font-size:11px; cursor:pointer; box-shadow:0 0 12px rgba(239, 68, 68, 0.4);">
-          SABOTAGE
-        </button>
-        <button id="btn-kill" style="display:none; width:70px; height:70px; border-radius:50%; background:#991b1b; border:2px solid #dc2626; color:#ffffff; font-weight:bold; font-size:12px; cursor:pointer; box-shadow:0 0 15px rgba(220, 38, 38, 0.6);">
-          KILL
-        </button>
-        <button id="btn-report" style="width:70px; height:70px; border-radius:50%; background:#1e293b; border:2px solid #475569; color:#64748b; font-weight:bold; font-size:12px; cursor:pointer; opacity:0.4;">
-          REPORT
-        </button>
-        <button id="btn-use" style="width:70px; height:70px; border-radius:50%; background:#0369a1; border:2px solid #38bdf8; color:#ffffff; font-weight:bold; font-size:14px; cursor:pointer; opacity:0.4; box-shadow:0 0 15px rgba(56, 189, 248, 0.5);">
-          USE
-        </button>
-      </div>
+      <!-- Center Banner for big moments -->
+      <div id="hud-banner" style="position:absolute; top:28%; left:50%; transform:translate(-50%, -50%) scale(0.9); opacity:0; transition:all 0.25s ease; pointer-events:none; z-index:35; font-family:Orbitron, sans-serif; font-weight:800; font-size:40px; letter-spacing:3px; text-align:center; white-space:nowrap;"></div>
     `;
 
     this.minimapCanvas = this.container.querySelector('#hud-minimap') as HTMLCanvasElement;
     this.minimapCtx = this.minimapCanvas.getContext('2d')!;
-
-    this.useBtn = this.container.querySelector('#btn-use') as HTMLButtonElement;
-    this.reportBtn = this.container.querySelector('#btn-report') as HTMLButtonElement;
-    this.killBtn = this.container.querySelector('#btn-kill') as HTMLButtonElement;
-    this.sabotageBtn = this.container.querySelector('#btn-sabotage') as HTMLButtonElement;
-    this.ventBtn = this.container.querySelector('#btn-vent') as HTMLButtonElement;
-    this.progressBar = this.container.querySelector('#hud-progress-bar') as HTMLElement;
-    this.taskListEl = this.container.querySelector('#hud-task-list') as HTMLElement;
-
-    this.useBtn.addEventListener('click', callbacks.onUse);
-    this.reportBtn.addEventListener('click', callbacks.onReport);
-    this.killBtn.addEventListener('click', callbacks.onKill);
-    this.sabotageBtn.addEventListener('click', callbacks.onSabotage);
-    this.ventBtn.addEventListener('click', callbacks.onVent);
+    this.timerEl = this.container.querySelector('#hud-timer') as HTMLElement;
+    this.rosterEl = this.container.querySelector('#hud-roster') as HTMLElement;
+    this.roleEl = this.container.querySelector('#hud-role') as HTMLElement;
+    this.bannerEl = this.container.querySelector('#hud-banner') as HTMLElement;
   }
 
-  public update(
-    snapshot: GameStateSnapshot,
-    myId: string,
-    myRole: Role,
-    myTasks: PlayerTask[],
-    canUse: boolean,
-    canReport: boolean,
-    canKill: boolean,
-    canVent: boolean,
-    inVent: boolean
-  ): void {
+  public showBanner(text: string, color: string, durationMs = 1600): void {
+    this.bannerEl.textContent = text;
+    this.bannerEl.style.color = color;
+    this.bannerEl.style.textShadow = `0 0 24px ${color}, 0 4px 12px rgba(0,0,0,0.9)`;
+    this.bannerEl.style.opacity = '1';
+    this.bannerEl.style.transform = 'translate(-50%, -50%) scale(1)';
+    if (this.bannerTimeout) window.clearTimeout(this.bannerTimeout);
+    this.bannerTimeout = window.setTimeout(() => {
+      this.bannerEl.style.opacity = '0';
+      this.bannerEl.style.transform = 'translate(-50%, -50%) scale(0.9)';
+    }, durationMs);
+  }
+
+  public update(snapshot: GameStateSnapshot, myId: string, localPos: { x: number; y: number }): void {
     const me = snapshot.players[myId];
     if (!me) return;
 
-    // Update Progress Bar
-    const total = snapshot.tasksTotal || 1;
-    const completed = snapshot.tasksCompleted || 0;
-    const pct = Math.min(100, Math.round((completed / total) * 100));
-    if (this.progressBar) {
-      this.progressBar.style.width = `${pct}%`;
+    // Timer turns red in the final 15 seconds
+    const secs = Math.ceil(snapshot.timeLeft);
+    this.timerEl.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    this.timerEl.style.color = secs <= 15 ? '#f87171' : '#e0f2fe';
+
+    // Role card
+    const isHunter = me.role === 'HUNTER';
+    let roleHint: string;
+    if (isHunter) {
+      roleHint = snapshot.hunterReleaseIn > 0
+        ? `Released in ${Math.ceil(snapshot.hunterReleaseIn)}...`
+        : 'Touch runners to freeze them. Freeze everyone to win!';
+    } else if (me.status === 'FROZEN') {
+      roleHint = 'You are frozen! Wait for a teammate to thaw you.';
+    } else {
+      roleHint = 'Avoid the hunters. Stand next to frozen teammates to thaw them.';
     }
-    const pctLabel = this.container.querySelector('#task-pct');
-    if (pctLabel) {
-      pctLabel.textContent = `${pct}%`;
-    }
+    this.roleEl.style.borderColor = isHunter ? '#ef4444' : '#38bdf8';
+    this.roleEl.innerHTML = `
+      <div style="font-family:Orbitron, sans-serif; font-size:15px; font-weight:800; letter-spacing:1px; color:${isHunter ? '#f87171' : '#7dd3fc'};">
+        ${isHunter ? 'FROST HUNTER' : 'RUNNER'}
+      </div>
+      <div style="font-size:12px; color:#cbd5e1; margin-top:4px; line-height:1.35;">${roleHint}</div>
+    `;
 
-    // Update Task List
-    if (this.taskListEl) {
-      if (myRole === 'CREW') {
-        let taskHtml = `<div style="color:#38bdf8; font-weight:bold; font-size:11px; letter-spacing:0.5px; border-bottom:1px solid #334155; padding-bottom:4px;">ASSIGNED TASKS:</div>`;
-        myTasks.forEach(t => {
-          taskHtml += `
-            <div style="color:${t.completed ? '#4ade80' : '#e2e8f0'}; text-decoration:${t.completed ? 'line-through' : 'none'}; opacity:${t.completed ? '0.7' : '1'};">
-              ${t.completed ? '✓' : '&bull;'} ${t.roomName}: ${t.type.replace('_', ' ').toUpperCase()}
-            </div>
-          `;
-        });
-        this.taskListEl.innerHTML = taskHtml;
-      } else {
-        this.taskListEl.innerHTML = `
-          <div style="color:#ef4444; font-weight:bold; font-size:11px; letter-spacing:0.5px; border-bottom:1px solid #7f1d1d; padding-bottom:4px;">SABOTEUR DIRECTIVE:</div>
-          <div style="color:#fca5a5; line-height:1.4;">Blend in with the research team. Eliminate crew members in isolation and sabotage station life support.</div>
-        `;
-      }
-    }
+    // Roster: hunters first, then runners with frozen state
+    const players = Object.values(snapshot.players).filter(p => p.status !== 'DISCONNECTED');
+    players.sort((a, b) => (a.role === b.role ? 0 : a.role === 'HUNTER' ? -1 : 1));
+    const freeCount = players.filter(p => p.role === 'RUNNER' && p.status === 'ALIVE').length;
+    const runnerCount = players.filter(p => p.role === 'RUNNER').length;
+    this.rosterEl.innerHTML = `
+      <div style="display:flex; justify-content:space-between; color:#94a3b8; font-weight:700; font-size:10px; letter-spacing:1px; border-bottom:1px solid #334155; padding-bottom:4px;">
+        <span>PLAYERS</span><span>${freeCount}/${runnerCount} FREE</span>
+      </div>
+      ${players.map(p => this.rosterRow(p, myId)).join('')}
+    `;
 
-    // Update Buttons
-    if (this.useBtn) {
-      this.useBtn.style.opacity = canUse ? '1' : '0.4';
-      this.useBtn.style.pointerEvents = canUse ? 'auto' : 'none';
-    }
-
-    if (this.reportBtn) {
-      this.reportBtn.style.opacity = canReport ? '1' : '0.4';
-      this.reportBtn.style.borderColor = canReport ? '#dc2626' : '#475569';
-      this.reportBtn.style.color = canReport ? '#ffffff' : '#64748b';
-      this.reportBtn.style.background = canReport ? '#b91c1c' : '#1e293b';
-      this.reportBtn.style.pointerEvents = canReport ? 'auto' : 'none';
-      if (canReport) {
-        this.reportBtn.style.boxShadow = '0 0 15px rgba(239, 68, 68, 0.7)';
-      } else {
-        this.reportBtn.style.boxShadow = 'none';
-      }
-    }
-
-    if (myRole === 'SABOTEUR') {
-      if (this.killBtn) {
-        this.killBtn.style.display = 'block';
-        const cooldown = Math.ceil(me.killCooldown);
-        if (cooldown > 0) {
-          this.killBtn.textContent = `KILL (${cooldown}s)`;
-          this.killBtn.style.opacity = '0.5';
-          this.killBtn.style.background = '#450a0a';
-          this.killBtn.style.pointerEvents = 'none';
-        } else {
-          this.killBtn.textContent = 'KILL';
-          this.killBtn.style.opacity = canKill ? '1' : '0.6';
-          this.killBtn.style.background = canKill ? '#dc2626' : '#991b1b';
-          this.killBtn.style.pointerEvents = canKill ? 'auto' : 'none';
-        }
-      }
-
-      if (this.sabotageBtn) {
-        this.sabotageBtn.style.display = 'block';
-      }
-
-      if (this.ventBtn) {
-        this.ventBtn.style.display = 'block';
-        this.ventBtn.textContent = inVent ? 'EXIT' : 'VENT';
-        this.ventBtn.style.opacity = canVent || inVent ? '1' : '0.4';
-        this.ventBtn.style.pointerEvents = canVent || inVent ? 'auto' : 'none';
-      }
-    }
-
-    // Render Minimap
-    this.renderMinimap(snapshot, me);
+    this.renderMinimap(snapshot, me, localPos);
   }
 
-  private renderMinimap(snapshot: GameStateSnapshot, me: { x: number; y: number }): void {
+  private rosterRow(p: PlayerPublic, myId: string): string {
+    const frozen = p.status === 'FROZEN';
+    const tag = p.role === 'HUNTER'
+      ? '<span style="color:#f87171;">HUNTER</span>'
+      : frozen ? '<span style="color:#7dd3fc;">❄ FROZEN</span>' : '<span style="color:#4ade80;">FREE</span>';
+    return `
+      <div style="display:flex; align-items:center; gap:7px; opacity:${frozen ? 0.6 : 1};">
+        <div style="width:10px; height:10px; border-radius:50%; background:${p.colorHex}; box-shadow:0 0 6px ${p.colorHex};"></div>
+        <span style="flex:1; color:#f8fafc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:${p.id === myId ? 700 : 400};">${p.name}</span>
+        <span style="font-size:10px; font-weight:700;">${tag}</span>
+      </div>
+    `;
+  }
+
+  private renderMinimap(snapshot: GameStateSnapshot, me: PlayerPublic, localPos: { x: number; y: number }): void {
     const ctx = this.minimapCtx;
     const w = this.minimapCanvas.width;
     const h = this.minimapCanvas.height;
@@ -194,38 +128,29 @@ export class HudOverlay {
     const scaleX = w / MAP_WIDTH;
     const scaleY = h / MAP_HEIGHT;
 
-    // Draw rooms
     for (const r of ROOMS) {
-      const rx = r.x * scaleX;
-      const ry = r.y * scaleY;
-      const rw = r.width * scaleX;
-      const rh = r.height * scaleY;
-
       ctx.fillStyle = '#1e293b';
-      ctx.fillRect(rx, ry, rw, rh);
+      ctx.fillRect(r.x * scaleX, r.y * scaleY, r.width * scaleX, r.height * scaleY);
       ctx.strokeStyle = '#38bdf8';
       ctx.lineWidth = 1;
-      ctx.strokeRect(rx, ry, rw, rh);
-
-      // Room label abbreviations
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '7px sans-serif';
-      const label = r.id.replace('_', ' ').toUpperCase();
-      ctx.fillText(label.slice(0, 7), rx + 2, ry + 8);
+      ctx.strokeRect(r.x * scaleX, r.y * scaleY, r.width * scaleX, r.height * scaleY);
     }
 
-    // Highlight sabotage alarm on minimap
-    if (snapshot.sabotage.active === 'meltdown') {
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.4)';
-      // Pulse reactor and engine
-      ctx.fillRect(250 * scaleX, 1100 * scaleY, 480 * scaleX, 460 * scaleY);
-      ctx.fillRect(1680 * scaleX, 1100 * scaleY, 480 * scaleX, 460 * scaleY);
+    // Runners can see frozen teammates on radar so they know where to go
+    if (me.role === 'RUNNER') {
+      const pulse = 2.5 + Math.sin(performance.now() * 0.008) * 1;
+      for (const p of Object.values(snapshot.players)) {
+        if (p.status !== 'FROZEN' || p.id === me.id) continue;
+        ctx.fillStyle = '#7dd3fc';
+        ctx.beginPath();
+        ctx.arc(p.x * scaleX, p.y * scaleY, pulse, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
-    // Draw player position dot
     ctx.fillStyle = '#facc15';
     ctx.beginPath();
-    ctx.arc(me.x * scaleX, me.y * scaleY, 3.5, 0, Math.PI * 2);
+    ctx.arc(localPos.x * scaleX, localPos.y * scaleY, 3.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1;

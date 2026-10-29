@@ -1,5 +1,5 @@
-import { PlayerPublic, PlayerTask, Role } from '../../shared/types.js';
-import { TASK_CONSOLES } from '../../shared/constants.js';
+import { Facing, PlayerPublic } from '../../shared/types.js';
+import { StationMapServer } from './StationMapServer.js';
 
 interface BotPathNode {
   id: string;
@@ -8,8 +8,13 @@ interface BotPathNode {
   neighbors: string[];
 }
 
+interface Point {
+  x: number;
+  y: number;
+}
+
 export const STATION_WAYPOINTS: Record<string, BotPathNode> = {
-  mess_hall: { id: 'mess_hall', x: 1200, y: 500, neighbors: ['node_mess_lab', 'node_mess_med', 'node_mess_storage', 'node_mess_hydro'] },
+  mess_hall: { id: 'mess_hall', x: 1200, y: 720, neighbors: ['node_mess_lab', 'node_mess_med', 'node_mess_storage', 'node_mess_hydro'] },
   node_mess_lab: { id: 'node_mess_lab', x: 850, y: 430, neighbors: ['mess_hall', 'cryo_lab'] },
   cryo_lab: { id: 'cryo_lab', x: 640, y: 310, neighbors: ['node_mess_lab'] },
   node_mess_med: { id: 'node_mess_med', x: 800, y: 670, neighbors: ['mess_hall', 'medbay'] },
@@ -28,204 +33,166 @@ export const STATION_WAYPOINTS: Record<string, BotPathNode> = {
   node_mess_hydro: { id: 'node_mess_hydro', x: 1575, y: 490, neighbors: ['mess_hall', 'hydroponics'] }
 };
 
+const ROOM_NODES = ['mess_hall', 'cryo_lab', 'medbay', 'reactor', 'storage', 'engine_room', 'electrical', 'hydroponics'];
+
+// Bots are a touch slower than humans so a skilled player can always outrun or catch them
+const BOT_SPEED = { RUNNER: 180, HUNTER: 190 };
+const FLEE_RADIUS = 280;
+const REPLAN_SEC = 0.4;
+
 export class BotController {
-  private botId: string;
-  private currentWaypointId: string = 'mess_hall';
-  private targetWaypointId: string = 'storage';
-  private path: string[] = [];
-  private taskPauseTimer: number = 0;
-  private targetTask: PlayerTask | null = null;
-  private voteTimer: number = 0;
-  private hasVotedThisMeeting: boolean = false;
-  private hasChattedThisMeeting: boolean = false;
+  private path: Point[] = [];
+  private replanTimer = 0;
+  private wanderNodeId: string = ROOM_NODES[0];
+  // Some bots are heroes who rush to thaw teammates, others play it safe
+  private bravery = 0.4 + Math.random() * 0.6;
 
-  constructor(botId: string) {
-    this.botId = botId;
-    this.pickNextDestination();
+  public reset(): void {
+    this.path = [];
+    this.replanTimer = 0;
+    this.pickWanderNode();
   }
 
-  public resetForMeeting(): void {
-    this.hasVotedThisMeeting = false;
-    this.hasChattedThisMeeting = false;
-    this.voteTimer = 3 + Math.random() * 8; // Vote within 3-11s into voting
-  }
-
-  public shouldChat(): boolean {
-    if (!this.hasChattedThisMeeting && Math.random() < 0.6) {
-      this.hasChattedThisMeeting = true;
-      return true;
-    }
-    return false;
-  }
-
-  public getRandomChatMessage(reporterName: string, isSaboteur: boolean): string {
-    const crewChats = [
-      "Where was the body found?",
-      `Did anyone see who was near ${reporterName}?`,
-      "I was doing wires in storage.",
-      "Skip for now unless someone saw something.",
-      "Suspect list is still too wide.",
-      "I was in the lab downloading telemetry.",
-      "Anyone have visual proof?"
-    ];
-
-    const saboteurChats = [
-      "I was with someone in reactor, all clear there.",
-      "Could be a self report?",
-      "Let's skip and watch each other.",
-      "I was heading to life support."
-    ];
-
-    const pool = isSaboteur ? [...crewChats, ...saboteurChats] : crewChats;
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-
-  public tickVote(deltaSec: number, candidateIds: string[]): string | null {
-    if (this.hasVotedThisMeeting) return null;
-    this.voteTimer -= deltaSec;
-    if (this.voteTimer <= 0) {
-      this.hasVotedThisMeeting = true;
-      // 30% chance to skip, 70% chance to vote a candidate
-      if (Math.random() < 0.3 || candidateIds.length === 0) {
-        return 'skip';
-      }
-      return candidateIds[Math.floor(Math.random() * candidateIds.length)];
-    }
-    return null;
-  }
-
-  public updateMovement(
+  public update(
     bot: PlayerPublic,
-    tasks: PlayerTask[],
+    everyone: PlayerPublic[],
     deltaSec: number
-  ): {
-    newX: number;
-    newY: number;
-    isMoving: boolean;
-    facing: 'left' | 'right' | 'up' | 'down';
-    completedTaskId?: string;
-  } {
-    if (bot.status !== 'ALIVE') {
-      return { newX: bot.x, newY: bot.y, isMoving: false, facing: bot.facing };
+  ): { x: number; y: number; isMoving: boolean; facing: Facing } {
+    this.replanTimer -= deltaSec;
+    if (this.replanTimer <= 0) {
+      this.replanTimer = REPLAN_SEC;
+      const goal = bot.role === 'HUNTER' ? this.hunterGoal(bot, everyone) : this.runnerGoal(bot, everyone);
+      this.path = this.planPath(bot, goal);
     }
 
-    // If currently paused doing a task
-    if (this.taskPauseTimer > 0) {
-      this.taskPauseTimer -= deltaSec;
-      if (this.taskPauseTimer <= 0) {
-        const completedId = this.targetTask ? this.targetTask.id : undefined;
-        this.targetTask = null;
-        this.pickNextDestination(tasks);
-        return {
-          newX: bot.x,
-          newY: bot.y,
-          isMoving: false,
-          facing: bot.facing,
-          completedTaskId: completedId
-        };
-      }
-      return { newX: bot.x, newY: bot.y, isMoving: false, facing: bot.facing };
-    }
-
-    // Need next waypoint?
-    if (this.path.length === 0) {
-      this.findPathTo(this.targetWaypointId);
-      if (this.path.length === 0) {
-        this.pickNextDestination(tasks);
-        this.findPathTo(this.targetWaypointId);
-      }
-    }
-
-    if (this.path.length === 0) {
-      return { newX: bot.x, newY: bot.y, isMoving: false, facing: bot.facing };
-    }
-
-    const nextNodeId = this.path[0];
-    const targetNode = STATION_WAYPOINTS[nextNodeId];
-    if (!targetNode) {
+    let target = this.path[0];
+    while (target && Math.hypot(target.x - bot.x, target.y - bot.y) < 12) {
       this.path.shift();
-      return { newX: bot.x, newY: bot.y, isMoving: false, facing: bot.facing };
+      target = this.path[0];
     }
 
-    const dx = targetNode.x - bot.x;
-    const dy = targetNode.y - bot.y;
+    if (!target) {
+      this.pickWanderNode();
+      this.replanTimer = 0;
+      return { x: bot.x, y: bot.y, isMoving: false, facing: bot.facing };
+    }
+
+    const dx = target.x - bot.x;
+    const dy = target.y - bot.y;
     const dist = Math.hypot(dx, dy);
-    const speed = 160; // px/sec
+    const step = Math.min(dist, BOT_SPEED[bot.role] * deltaSec);
+    const moved = StationMapServer.validateMovement(bot.x, bot.y, bot.x + (dx / dist) * step, bot.y + (dy / dist) * step);
 
-    let facing: 'left' | 'right' | 'up' | 'down' = bot.facing;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      facing = dx < 0 ? 'left' : 'right';
-    } else {
-      facing = dy < 0 ? 'up' : 'down';
-    }
+    const facing: Facing = Math.abs(dx) > Math.abs(dy)
+      ? (dx < 0 ? 'left' : 'right')
+      : (dy < 0 ? 'up' : 'down');
 
-    if (dist < 15) {
-      // Arrived at waypoint
-      this.currentWaypointId = nextNodeId;
-      this.path.shift();
-
-      // Check if reached destination
-      if (this.path.length === 0) {
-        // If arrived at task room, simulate doing task
-        const uncompleted = tasks.find(t => !t.completed && t.roomId === this.currentWaypointId);
-        if (uncompleted && Math.random() < 0.8) {
-          this.targetTask = uncompleted;
-          this.taskPauseTimer = 3.5 + Math.random() * 3.0; // 3.5 to 6.5s to do task
-          return { newX: targetNode.x, newY: targetNode.y, isMoving: false, facing };
-        } else {
-          this.pickNextDestination(tasks);
-        }
-      }
-
-      return { newX: targetNode.x, newY: targetNode.y, isMoving: true, facing };
-    }
-
-    const step = Math.min(dist, speed * deltaSec);
-    const newX = bot.x + (dx / dist) * step;
-    const newY = bot.y + (dy / dist) * step;
-
-    return { newX, newY, isMoving: true, facing };
+    return { x: moved.x, y: moved.y, isMoving: true, facing };
   }
 
-  private pickNextDestination(tasks: PlayerTask[] = []): void {
-    const uncompleted = tasks.filter(t => !t.completed);
-    if (uncompleted.length > 0 && Math.random() < 0.65) {
-      const task = uncompleted[Math.floor(Math.random() * uncompleted.length)];
-      if (STATION_WAYPOINTS[task.roomId]) {
-        this.targetWaypointId = task.roomId;
-        return;
-      }
-    }
-
-    // Pick random room waypoint
-    const roomKeys = ['mess_hall', 'cryo_lab', 'medbay', 'reactor', 'storage', 'engine_room', 'electrical', 'hydroponics'];
-    const candidates = roomKeys.filter(k => k !== this.currentWaypointId);
-    this.targetWaypointId = candidates[Math.floor(Math.random() * candidates.length)];
+  private hunterGoal(bot: PlayerPublic, everyone: PlayerPublic[]): Point {
+    const prey = this.nearest(bot, everyone.filter(p =>
+      p.role === 'RUNNER' && p.status === 'ALIVE' && p.immuneFor <= 0
+    ));
+    return prey ?? this.wanderPoint(bot);
   }
 
-  private findPathTo(targetId: string): void {
-    if (this.currentWaypointId === targetId) return;
+  private runnerGoal(bot: PlayerPublic, everyone: PlayerPublic[]): Point {
+    const hunter = this.nearest(bot, everyone.filter(p => p.role === 'HUNTER' && p.status === 'ALIVE'));
+    if (hunter && Math.hypot(hunter.x - bot.x, hunter.y - bot.y) < FLEE_RADIUS) {
+      return this.fleePoint(bot, hunter);
+    }
 
-    // BFS search through STATION_WAYPOINTS graph
-    const queue: { id: string; path: string[] }[] = [{ id: this.currentWaypointId, path: [] }];
-    const visited = new Set<string>([this.currentWaypointId]);
+    const frozen = this.nearest(bot, everyone.filter(p => p.status === 'FROZEN'));
+    if (frozen && Math.random() < this.bravery) {
+      return frozen;
+    }
+
+    return this.wanderPoint(bot);
+  }
+
+  // Run to whichever node next to us leads furthest from the hunter
+  private fleePoint(bot: PlayerPublic, hunter: Point): Point {
+    const here = this.nearestNode(bot);
+    const options = [here, ...here.neighbors.map(id => STATION_WAYPOINTS[id])];
+    let best = here;
+    let bestScore = -Infinity;
+    for (const node of options) {
+      const score = Math.hypot(node.x - hunter.x, node.y - hunter.y) - Math.hypot(node.x - bot.x, node.y - bot.y) * 0.3;
+      if (score > bestScore) {
+        bestScore = score;
+        best = node;
+      }
+    }
+    return best;
+  }
+
+  private wanderPoint(bot: PlayerPublic): Point {
+    const node = STATION_WAYPOINTS[this.wanderNodeId];
+    if (Math.hypot(node.x - bot.x, node.y - bot.y) < 30) {
+      this.pickWanderNode();
+    }
+    return STATION_WAYPOINTS[this.wanderNodeId];
+  }
+
+  private pickWanderNode(): void {
+    const candidates = ROOM_NODES.filter(k => k !== this.wanderNodeId);
+    this.wanderNodeId = candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  private nearest<T extends Point>(from: Point, candidates: T[]): T | null {
+    let best: T | null = null;
+    let bestDist = Infinity;
+    for (const c of candidates) {
+      const d = Math.hypot(c.x - from.x, c.y - from.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  private nearestNode(p: Point): BotPathNode {
+    return this.nearest(p, Object.values(STATION_WAYPOINTS))!;
+  }
+
+  /**
+   * BFS through the waypoint graph, then a final straight leg to the goal itself
+   */
+  private planPath(bot: PlayerPublic, goal: Point): Point[] {
+    const start = this.nearestNode(bot);
+    const end = this.nearestNode(goal);
+
+    const queue: { id: string; path: string[] }[] = [{ id: start.id, path: [start.id] }];
+    const visited = new Set<string>([start.id]);
+    let nodeIds: string[] = [start.id];
 
     while (queue.length > 0) {
       const current = queue.shift()!;
-      if (current.id === targetId) {
-        this.path = current.path;
-        return;
+      if (current.id === end.id) {
+        nodeIds = current.path;
+        break;
       }
-
-      const node = STATION_WAYPOINTS[current.id];
-      if (node) {
-        for (const neighborId of node.neighbors) {
-          if (!visited.has(neighborId)) {
-            visited.add(neighborId);
-            queue.push({ id: neighborId, path: [...current.path, neighborId] });
-          }
+      for (const neighborId of STATION_WAYPOINTS[current.id].neighbors) {
+        if (!visited.has(neighborId)) {
+          visited.add(neighborId);
+          queue.push({ id: neighborId, path: [...current.path, neighborId] });
         }
       }
     }
+
+    const points: Point[] = nodeIds.map(id => STATION_WAYPOINTS[id]);
+
+    // Skip the first node if we're already past it on the way to the second
+    if (points.length > 1) {
+      const [first, second] = points;
+      if (Math.hypot(second.x - bot.x, second.y - bot.y) < Math.hypot(second.x - first.x, second.y - first.y)) {
+        points.shift();
+      }
+    }
+
+    points.push({ x: goal.x, y: goal.y });
+    return points;
   }
 }

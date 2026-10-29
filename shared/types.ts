@@ -1,20 +1,10 @@
-export type Role = 'CREW' | 'SABOTEUR';
+export type Role = 'RUNNER' | 'HUNTER';
 
-export type PlayerStatus = 'ALIVE' | 'DEAD' | 'DISCONNECTED';
+export type PlayerStatus = 'ALIVE' | 'FROZEN' | 'DISCONNECTED';
 
-export type GamePhase = 'LOBBY' | 'PLAYING' | 'MEETING' | 'ENDED';
+export type GamePhase = 'LOBBY' | 'PLAYING' | 'ENDED';
 
-export type TaskType = 'wires' | 'card_swipe' | 'download' | 'keypad' | 'levers';
-
-export interface PlayerTask {
-  id: string;
-  type: TaskType;
-  roomId: string;
-  roomName: string;
-  x: number;
-  y: number;
-  completed: boolean;
-}
+export type Facing = 'left' | 'right' | 'up' | 'down';
 
 export interface PlayerPublic {
   id: string;
@@ -24,74 +14,20 @@ export interface PlayerPublic {
   isHost: boolean;
   isBot: boolean;
   status: PlayerStatus;
+  role: Role; // public in freeze tag: everyone knows who the hunters are
   x: number;
   y: number;
-  vx: number;
-  vy: number;
-  facing: 'left' | 'right' | 'up' | 'down';
+  facing: Facing;
   isMoving: boolean;
-  inVent: boolean;
-  role?: Role; // only revealed to self or fellow saboteurs, or at game end
-  killCooldown: number;
-  emergencyMeetingsLeft: number;
-}
-
-export interface DeadBody {
-  id: string;
-  victimId: string;
-  victimName: string;
-  victimColorHex: string;
-  x: number;
-  y: number;
-}
-
-export type SabotageType = 'meltdown' | 'blackout' | null;
-
-export interface SabotageState {
-  active: SabotageType;
-  timeLeft: number; // for meltdown (e.g. 45s down to 0)
-  meltdownFix: {
-    reactorActive: boolean;
-    lifeSupportActive: boolean;
-  };
-  blackoutSwitches: boolean[]; // 5 electrical breakers to flip on
-}
-
-export type MeetingPhase = 'DISCUSSION' | 'VOTING' | 'RESULTS' | 'EJECTION';
-
-export interface MeetingState {
-  active: boolean;
-  reason: 'emergency_button' | 'body_reported';
-  reporterId: string;
-  reporterName: string;
-  victimName?: string;
-  phase: MeetingPhase;
-  timeLeft: number;
-  votes: Record<string, string>; // voterId -> targetPlayerId | 'skip'
-  ejectedId?: string; // playerId or 'skip' or 'tie'
-  ejectedName?: string;
-  ejectedRole?: Role;
-  wasSaboteur?: boolean;
-}
-
-export interface ChatMessage {
-  id: string;
-  senderId: string;
-  senderName: string;
-  senderColorHex: string;
-  text: string;
-  isGhost: boolean;
-  timestamp: number;
+  thawProgress: number; // 0..1 while teammates are thawing this frozen runner
+  immuneFor: number; // seconds of tag immunity left after being thawed
+  tags: number;
+  rescues: number;
 }
 
 export interface GameSettings {
-  saboteurCount: number; // 1 to 3
-  botCount: number; // 0 to 9
-  confirmEjects: boolean;
-  killCooldownSec: number;
-  discussionSec: number;
-  votingSec: number;
-  emergencyMeetingsPerPlayer: number;
+  hunterCount: number; // 1 to 3
+  roundSec: number;
 }
 
 export interface StationRoomDef {
@@ -104,18 +40,7 @@ export interface StationRoomDef {
   color: string;
 }
 
-export interface VentDef {
-  id: string;
-  roomId: string;
-  x: number;
-  y: number;
-  connectedTo: string[]; // IDs of connected vents
-}
-
-export interface TaskConsoleDef {
-  id: string;
-  type: TaskType;
-  roomId: string;
+export interface StationConsoleDef {
   x: number;
   y: number;
   label: string;
@@ -125,12 +50,9 @@ export interface GameStateSnapshot {
   roomCode: string;
   phase: GamePhase;
   players: Record<string, PlayerPublic>;
-  tasksTotal: number;
-  tasksCompleted: number;
-  deadBodies: DeadBody[];
-  sabotage: SabotageState;
-  meeting: MeetingState | null;
-  winner: 'CREW' | 'SABOTEUR' | null;
+  timeLeft: number;
+  hunterReleaseIn: number; // countdown before hunters may move
+  winner: Role | null;
   winReason: string | null;
   settings: GameSettings;
 }

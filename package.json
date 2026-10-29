@@ -1,7 +1,7 @@
 {
   "name": "the-thaw",
   "version": "1.0.0",
-  "description": "The Thaw - 2D Multiplayer Social Deduction Game on a Frozen Moon",
+  "description": "The Thaw - multiplayer freeze tag on a frozen moon",
   "private": true,
   "type": "module",
   "scripts": {

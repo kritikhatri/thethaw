@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { io, Socket } from 'socket.io-client';
-import { COLORS, SOCKET_EVENTS } from '@shared/constants';
+import { COLORS, MIN_PLAYERS, SOCKET_EVENTS } from '@shared/constants';
 import { GameStateSnapshot } from '@shared/types';
 import { SoundSynthesizer } from '../assets/SoundSynthesizer.js';
 
@@ -110,7 +110,7 @@ export class LobbyScene extends Phaser.Scene {
             "></span>
           </h1>
           <div style="color:#38bdf8; font-size:14px; font-weight:600; letter-spacing:3px; margin-top:2px;">
-            STATION BOREAS &bull; FROZEN MOON GLACIES-IV
+            FREEZE TAG ON A FROZEN MOON
           </div>
         </div>
 
@@ -213,7 +213,7 @@ export class LobbyScene extends Phaser.Scene {
     const isHost = me ? me.isHost : false;
     const playersList = Object.values(snapshot.players);
     const playerCount = playersList.length;
-    const canStart = playerCount >= 4 && isHost;
+    const canStart = playerCount >= MIN_PLAYERS && isHost;
 
     this.uiLayer.innerHTML = `
       <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:radial-gradient(circle at 50% 30%, #0f172a 0%, #020617 100%); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
@@ -232,7 +232,7 @@ export class LobbyScene extends Phaser.Scene {
 
             <div style="text-align:right;">
               <div style="color:#94a3b8; font-size:12px; font-weight:bold; letter-spacing:1px;">SCIENTISTS ASSEMBLED</div>
-              <div style="font-size:20px; font-weight:bold; color:${playerCount >= 4 ? '#4ade80' : '#facc15'}; margin-top:2px;">
+              <div style="font-size:20px; font-weight:bold; color:${playerCount >= MIN_PLAYERS ? '#4ade80' : '#facc15'}; margin-top:2px;">
                 ${playerCount} / 10
               </div>
             </div>
@@ -264,11 +264,11 @@ export class LobbyScene extends Phaser.Scene {
           ${isHost ? `
             <div style="background:#090d16; border:1px solid #1e293b; border-radius:8px; padding:14px; margin-bottom:18px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <span style="font-size:13px; color:#e2e8f0; font-weight:bold;">Expedition Saboteurs:</span>
-                <select id="select-saboteurs" style="background:#1e293b; color:#f8fafc; border:1px solid #334155; border-radius:6px; padding:4px 8px; font-size:13px; font-weight:bold; outline:none;">
-                  <option value="1" ${snapshot.settings.saboteurCount === 1 ? 'selected' : ''}>1 Saboteur</option>
-                  <option value="2" ${snapshot.settings.saboteurCount === 2 ? 'selected' : ''}>2 Saboteurs</option>
-                  <option value="3" ${snapshot.settings.saboteurCount === 3 ? 'selected' : ''}>3 Saboteurs</option>
+                <span style="font-size:13px; color:#e2e8f0; font-weight:bold;">Frost Hunters:</span>
+                <select id="select-hunters" style="background:#1e293b; color:#f8fafc; border:1px solid #334155; border-radius:6px; padding:4px 8px; font-size:13px; font-weight:bold; outline:none;">
+                  <option value="1" ${snapshot.settings.hunterCount === 1 ? 'selected' : ''}>1 Hunter</option>
+                  <option value="2" ${snapshot.settings.hunterCount === 2 ? 'selected' : ''}>2 Hunters</option>
+                  <option value="3" ${snapshot.settings.hunterCount === 3 ? 'selected' : ''}>3 Hunters</option>
                 </select>
               </div>
 
@@ -276,7 +276,7 @@ export class LobbyScene extends Phaser.Scene {
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
                   <div style="font-size:13px; color:#e2e8f0; font-weight:bold;">Solo Testing AI Bots:</div>
-                  <div style="font-size:11px; color:#64748b;">Add wandering AI scientists that perform tasks & vote.</div>
+                  <div style="font-size:11px; color:#64748b;">Add AI players that chase, flee and rescue.</div>
                 </div>
                 <div style="display:flex; gap:6px;">
                   <button id="btn-add-bot" style="background:#0284c7; color:#ffffff; border:none; border-radius:6px; padding:6px 12px; font-size:12px; font-weight:bold; cursor:pointer;">+ ADD BOT</button>
@@ -293,7 +293,7 @@ export class LobbyScene extends Phaser.Scene {
           <!-- Start Game Button -->
           ${isHost ? `
             <button id="btn-start" ${!canStart ? 'disabled' : ''} style="width:100%; background:${canStart ? 'linear-gradient(135deg, #16a34a, #15803d)' : '#334155'}; color:#ffffff; border:none; border-radius:8px; padding:14px; font-size:16px; font-weight:900; letter-spacing:1px; cursor:${canStart ? 'pointer' : 'default'}; box-shadow:${canStart ? '0 0 20px rgba(34, 197, 94, 0.5)' : 'none'};">
-              ${canStart ? 'LAUNCH EXPEDITION' : `NEED AT LEAST 4 SCIENTISTS (${playerCount}/4)`}
+              ${canStart ? 'LAUNCH EXPEDITION' : `NEED AT LEAST ${MIN_PLAYERS} PLAYERS (${playerCount}/${MIN_PLAYERS})`}
             </button>
           ` : ''}
 
@@ -342,11 +342,11 @@ export class LobbyScene extends Phaser.Scene {
 
     // Host controls listeners
     if (isHost) {
-      const selectSaboteurs = this.uiLayer.querySelector('#select-saboteurs') as HTMLSelectElement;
-      if (selectSaboteurs) {
-        selectSaboteurs.addEventListener('change', () => {
+      const selectHunters = this.uiLayer.querySelector('#select-hunters') as HTMLSelectElement;
+      if (selectHunters) {
+        selectHunters.addEventListener('change', () => {
           this.socket.emit(SOCKET_EVENTS.UPDATE_SETTINGS, {
-            saboteurCount: parseInt(selectSaboteurs.value, 10)
+            hunterCount: parseInt(selectHunters.value, 10)
           });
         });
       }

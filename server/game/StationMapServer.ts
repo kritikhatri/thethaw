@@ -1,4 +1,4 @@
-import { ROOMS, CORRIDORS, EMERGENCY_TABLE, VENTS } from '../../shared/constants.js';
+import { ROOMS, CORRIDORS, EMERGENCY_TABLE } from '../../shared/constants.js';
 
 export class StationMapServer {
   private static playerRadius = 16;
@@ -80,21 +80,5 @@ export class StationMapServer {
       }
     }
     return null;
-  }
-
-  /**
-   * Find nearest vent within radius
-   */
-  public static getNearestVent(x: number, y: number, maxDist: number) {
-    let nearest = null;
-    let minD = maxDist;
-    for (const vent of VENTS) {
-      const d = Math.hypot(vent.x - x, vent.y - y);
-      if (d < minD) {
-        minD = d;
-        nearest = vent;
-      }
-    }
-    return nearest;
   }
 }

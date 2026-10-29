@@ -1,4 +1,4 @@
-import { GameSettings, StationRoomDef, TaskConsoleDef, VentDef } from './types.js';
+import { GameSettings, StationConsoleDef, StationRoomDef } from './types.js';
 
 export const COLORS = [
   { key: 'cyan', name: 'Glacier Cyan', hex: '#22d3ee', darkHex: '#0891b2' },
@@ -14,13 +14,18 @@ export const COLORS = [
 ];
 
 export const DEFAULT_SETTINGS: GameSettings = {
-  saboteurCount: 1,
-  botCount: 3,
-  confirmEjects: true,
-  killCooldownSec: 25,
-  discussionSec: 15,
-  votingSec: 20,
-  emergencyMeetingsPerPlayer: 1
+  hunterCount: 1,
+  roundSec: 120
+};
+
+export const MIN_PLAYERS = 3;
+export const HUNTER_RELEASE_SEC = 4;
+export const THAW_SEC = 2;
+export const THAW_IMMUNITY_SEC = 2.5;
+
+export const SPEED = {
+  RUNNER: 200,
+  HUNTER: 215
 };
 
 export const MAP_WIDTH = 2400;
@@ -65,48 +70,29 @@ export const CORRIDORS = [
   { x: 1780, y: 970, width: 100, height: 160 }
 ];
 
-export const VENTS: VentDef[] = [
-  { id: 'vent_reactor', roomId: 'reactor', x: 350, y: 1200, connectedTo: ['vent_medbay', 'vent_storage'] },
-  { id: 'vent_medbay', roomId: 'medbay', x: 340, y: 620, connectedTo: ['vent_reactor', 'vent_lab'] },
-  { id: 'vent_lab', roomId: 'cryo_lab', x: 550, y: 230, connectedTo: ['vent_medbay', 'vent_storage'] },
-  { id: 'vent_storage', roomId: 'storage', x: 1050, y: 1260, connectedTo: ['vent_lab', 'vent_engine', 'vent_reactor'] },
-  { id: 'vent_engine', roomId: 'engine_room', x: 1800, y: 1200, connectedTo: ['vent_storage'] }
+// Decorative consoles scattered around the station
+export const STATION_CONSOLES: StationConsoleDef[] = [
+  { x: 1100, y: 1220, label: 'Wiring Conduit Alpha' },
+  { x: 720, y: 220, label: 'Wiring Conduit Beta' },
+  { x: 1380, y: 390, label: 'Thermal ID Swipe' },
+  { x: 320, y: 780, label: 'Decon Authorization' },
+  { x: 1980, y: 300, label: 'Satellite Uplink' },
+  { x: 1350, y: 1480, label: 'Telemetry Archive' },
+  { x: 320, y: 1450, label: 'Cryo Core Calibration' },
+  { x: 500, y: 400, label: 'Specimen Cryo Lock' },
+  { x: 2050, y: 1200, label: 'Coolant Pressure Levers' },
+  { x: 620, y: 1200, label: 'Thermal Dampeners' }
 ];
-
-export const TASK_CONSOLES: TaskConsoleDef[] = [
-  { id: 'task_wires_storage', type: 'wires', roomId: 'storage', x: 1100, y: 1220, label: 'Wiring Conduit Alpha' },
-  { id: 'task_wires_lab', type: 'wires', roomId: 'cryo_lab', x: 720, y: 220, label: 'Wiring Conduit Beta' },
-  { id: 'task_card_mess', type: 'card_swipe', roomId: 'mess_hall', x: 1380, y: 390, label: 'Thermal ID Swipe' },
-  { id: 'task_card_medbay', type: 'card_swipe', roomId: 'medbay', x: 320, y: 780, label: 'Decon Authorization' },
-  { id: 'task_download_comms', type: 'download', roomId: 'hydroponics', x: 1980, y: 300, label: 'Satellite Uplink' },
-  { id: 'task_download_storage', type: 'download', roomId: 'storage', x: 1350, y: 1480, label: 'Telemetry Archive' },
-  { id: 'task_keypad_reactor', type: 'keypad', roomId: 'reactor', x: 320, y: 1450, label: 'Cryo Core Calibration' },
-  { id: 'task_keypad_lab', type: 'keypad', roomId: 'cryo_lab', x: 500, y: 400, label: 'Specimen Cryo Lock' },
-  { id: 'task_levers_engine', type: 'levers', roomId: 'engine_room', x: 2050, y: 1200, label: 'Coolant Pressure Levers' },
-  { id: 'task_levers_reactor', type: 'levers', roomId: 'reactor', x: 620, y: 1200, label: 'Thermal Dampeners' }
-];
-
-// Sabotage fix locations
-export const SABOTAGE_FIX_LOCATIONS = {
-  meltdownReactor: { x: 490, y: 1320, roomId: 'reactor', label: 'Reactor Thermal Stabilizer' },
-  meltdownLifeSupport: { x: 1920, y: 1320, roomId: 'engine_room', label: 'Life Support Stabilizer' },
-  electricalBreakers: { x: 1800, y: 740, roomId: 'electrical', label: 'Main Breaker Switchboard' }
-};
 
 export const VISION_RADIUS = {
-  NORMAL: 360,
-  BLACKOUT_CREW: 130,
-  BLACKOUT_SABOTEUR: 360,
-  GHOST: 600
+  RUNNER: 380,
+  HUNTER: 320,
+  FROZEN: 600
 };
 
 export const INTERACTION_DISTANCES = {
-  TASK: 85,
-  EMERGENCY: 90,
-  KILL: 80,
-  VENT: 75,
-  REPORT: 110,
-  SABOTAGE_FIX: 85
+  TAG: 46,
+  THAW: 70
 };
 
 export const SOCKET_EVENTS = {
@@ -119,28 +105,12 @@ export const SOCKET_EVENTS = {
   REMOVE_BOT: 'remove_bot',
   START_GAME: 'start_game',
   PLAYER_MOVE: 'player_move',
-  COMPLETE_TASK: 'complete_task',
-  USE_VENT: 'use_vent',
-  KILL_PLAYER: 'kill_player',
-  TRIGGER_SABOTAGE: 'trigger_sabotage',
-  FIX_SABOTAGE_STEP: 'fix_sabotage_step',
-  REPORT_BODY: 'report_body',
-  TRIGGER_EMERGENCY: 'trigger_emergency',
-  SEND_CHAT: 'send_chat',
-  CAST_VOTE: 'cast_vote',
   RETURN_TO_LOBBY: 'return_to_lobby',
 
   // Server -> Client
   ROOM_JOINED: 'room_joined',
   ERROR_MSG: 'error_msg',
   GAME_STATE_UPDATE: 'game_state_update',
-  PLAYER_ROLE: 'player_role',
-  ASSIGNED_TASKS: 'assigned_tasks',
-  KILL_OCCURRED: 'kill_occurred',
-  MEETING_STARTED: 'meeting_started',
-  CHAT_MESSAGE: 'chat_message',
-  VOTE_UPDATE: 'vote_update',
-  MEETING_ENDED: 'meeting_ended',
-  SABOTAGE_UPDATE: 'sabotage_update',
-  GAME_OVER: 'game_over'
+  PLAYER_FROZEN: 'player_frozen',
+  PLAYER_THAWED: 'player_thawed'
 };

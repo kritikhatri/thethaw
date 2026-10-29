@@ -5,7 +5,7 @@ export class ProceduralGraphics {
   public static generateAll(scene: Phaser.Scene): void {
     this.createStationTiles(scene);
     this.createCharacterSprites(scene);
-    this.createConsolesAndVents(scene);
+    this.createConsoles(scene);
     this.createEmergencyTable(scene);
     this.createFrostOverlayTexture(scene);
     this.createAtmosphereTextures(scene);
@@ -145,7 +145,7 @@ export class ProceduralGraphics {
   }
 
   /**
-   * Procedural astronaut scientist characters and dead body textures
+   * Procedural astronaut characters and the frozen ice block
    */
   private static createCharacterSprites(scene: Phaser.Scene): void {
     COLORS.forEach(c => {
@@ -214,77 +214,51 @@ export class ProceduralGraphics {
         scene.textures.addCanvas(key, canvas);
       }
 
-      // 2. Dead Body Sprite (48x48)
-      const deadKey = `dead_${c.key}`;
-      if (!scene.textures.exists(deadKey)) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 48;
-        canvas.height = 48;
-        const ctx = canvas.getContext('2d')!;
-
-        // Broken suit base with ice crystals
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.4)';
-        ctx.beginPath();
-        ctx.ellipse(24, 36, 20, 8, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Fallen torso
-        ctx.fillStyle = c.hex;
-        ctx.beginPath();
-        ctx.ellipse(24, 28, 16, 10, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Broken suit bone / thermal conduit sticking out
-        ctx.fillStyle = '#f8fafc';
-        ctx.beginPath();
-        ctx.roundRect(21, 12, 6, 14, 2);
-        ctx.fill();
-
-        // Broken visor glass shards
-        ctx.fillStyle = '#38bdf8';
-        ctx.beginPath();
-        ctx.moveTo(30, 24);
-        ctx.lineTo(38, 20);
-        ctx.lineTo(36, 28);
-        ctx.closePath();
-        ctx.fill();
-
-        scene.textures.addCanvas(deadKey, canvas);
-      }
     });
 
-    // Ghost texture (cyan glowing translucent silhouette)
-    if (!scene.textures.exists('player_ghost')) {
+    // Translucent ice block that encases frozen players
+    if (!scene.textures.exists('ice_block')) {
       const canvas = document.createElement('canvas');
-      canvas.width = 48;
-      canvas.height = 48;
+      canvas.width = 56;
+      canvas.height = 60;
       const ctx = canvas.getContext('2d')!;
 
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.55)';
+      const grad = ctx.createLinearGradient(0, 0, 56, 60);
+      grad.addColorStop(0, 'rgba(224, 242, 254, 0.75)');
+      grad.addColorStop(0.5, 'rgba(125, 211, 252, 0.45)');
+      grad.addColorStop(1, 'rgba(14, 165, 233, 0.6)');
+      ctx.fillStyle = grad;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(24, 18, 14, Math.PI, 0, false);
-      ctx.lineTo(38, 38);
-      // Wavy ghost tail
-      ctx.quadraticCurveTo(31, 33, 24, 38);
-      ctx.quadraticCurveTo(17, 33, 10, 38);
-      ctx.closePath();
+      ctx.roundRect(3, 3, 50, 54, 8);
       ctx.fill();
+      ctx.stroke();
 
-      // Hollow glow eyes
-      ctx.fillStyle = '#ffffff';
+      // Glints and cracks
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(20, 18, 3, 0, Math.PI * 2);
-      ctx.arc(28, 18, 3, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.moveTo(10, 14);
+      ctx.lineTo(20, 8);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(38, 10);
+      ctx.lineTo(32, 26);
+      ctx.lineTo(42, 34);
+      ctx.moveTo(14, 44);
+      ctx.lineTo(24, 38);
+      ctx.stroke();
 
-      scene.textures.addCanvas('player_ghost', canvas);
+      scene.textures.addCanvas('ice_block', canvas);
     }
   }
 
   /**
-   * Consoles, vents, and stations
+   * Station consoles
    */
-  private static createConsolesAndVents(scene: Phaser.Scene): void {
+  private static createConsoles(scene: Phaser.Scene): void {
     // 1. Task Console (48x48)
     if (!scene.textures.exists('console_task')) {
       const canvas = document.createElement('canvas');
@@ -330,32 +304,6 @@ export class ProceduralGraphics {
       scene.textures.addCanvas('console_task', canvas);
     }
 
-    // 2. Vent Grate (48x48)
-    if (!scene.textures.exists('vent_grate')) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 48;
-      canvas.height = 48;
-      const ctx = canvas.getContext('2d')!;
-
-      // Frame
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(4, 8, 40, 32);
-      ctx.strokeStyle = '#475569';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(4, 8, 40, 32);
-
-      // Cold vent glow
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
-      ctx.fillRect(8, 12, 32, 24);
-
-      // Grate slats
-      ctx.fillStyle = '#020617';
-      for (let y = 14; y < 36; y += 5) {
-        ctx.fillRect(8, y, 32, 2);
-      }
-
-      scene.textures.addCanvas('vent_grate', canvas);
-    }
   }
 
   /**
@@ -415,7 +363,7 @@ export class ProceduralGraphics {
   }
 
   /**
-   * Screen frost vignette texture for sabotage & temperature drop
+   * Screen frost vignette shown when frozen or a hunter is near
    */
   private static createFrostOverlayTexture(scene: Phaser.Scene): void {
     if (!scene.textures.exists('frost_vignette')) {

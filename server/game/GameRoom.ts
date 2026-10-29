@@ -1,48 +1,37 @@
 import { Server } from 'socket.io';
 import {
+  Facing,
   GamePhase,
   GameSettings,
   GameStateSnapshot,
   PlayerPublic,
-  PlayerStatus,
-  PlayerTask,
-  Role,
-  DeadBody,
-  ChatMessage
+  Role
 } from '../../shared/types.js';
 import {
   COLORS,
   DEFAULT_SETTINGS,
   EMERGENCY_TABLE,
+  HUNTER_RELEASE_SEC,
   INTERACTION_DISTANCES,
+  MIN_PLAYERS,
+  ROOMS,
   SOCKET_EVENTS,
-  VENTS
+  THAW_IMMUNITY_SEC,
+  THAW_SEC
 } from '../../shared/constants.js';
 import { StationMapServer } from './StationMapServer.js';
-import { TaskManager } from './TaskManager.js';
-import { SabotageManager } from './SabotageManager.js';
-import { MeetingManager } from './MeetingManager.js';
 import { BotController } from './BotController.js';
-
-interface InternalPlayer extends PlayerPublic {
-  role: Role;
-  assignedTasks: PlayerTask[];
-  inVent: boolean;
-  currentVentId: string | null;
-}
 
 export class GameRoom {
   public code: string;
   private io: Server;
   private phase: GamePhase = 'LOBBY';
-  private players: Map<string, InternalPlayer> = new Map();
+  private players: Map<string, PlayerPublic> = new Map();
   private bots: Map<string, BotController> = new Map();
-  private deadBodies: DeadBody[] = [];
-  private chatMessages: ChatMessage[] = [];
-  private sabotageManager: SabotageManager = new SabotageManager();
-  private meetingManager: MeetingManager;
   private settings: GameSettings = { ...DEFAULT_SETTINGS };
-  private winner: 'CREW' | 'SABOTEUR' | null = null;
+  private timeLeft: number = 0;
+  private hunterReleaseIn: number = 0;
+  private winner: Role | null = null;
   private winReason: string | null = null;
 
   private loopInterval: NodeJS.Timeout | null = null;
@@ -51,7 +40,6 @@ export class GameRoom {
   constructor(code: string, io: Server) {
     this.code = code;
     this.io = io;
-    this.meetingManager = new MeetingManager(this.settings.discussionSec, this.settings.votingSec);
     this.startLoop();
   }
 
@@ -68,32 +56,30 @@ export class GameRoom {
     return false;
   }
 
-  public addPlayer(socketId: string, name: string): InternalPlayer {
-    const isHost = this.players.size === 0;
-    const availableColor = this.getAvailableColor();
-
-    const player: InternalPlayer = {
-      id: socketId,
-      name: name || `Scientist ${this.players.size + 1}`,
-      colorKey: availableColor.key,
-      colorHex: availableColor.hex,
-      isHost,
-      isBot: false,
+  private createPlayer(id: string, name: string, isBot: boolean): PlayerPublic {
+    const color = this.getAvailableColor();
+    return {
+      id,
+      name,
+      colorKey: color.key,
+      colorHex: color.hex,
+      isHost: !isBot && this.players.size === 0,
+      isBot,
       status: 'ALIVE',
+      role: 'RUNNER',
       x: EMERGENCY_TABLE.x,
-      y: EMERGENCY_TABLE.y,
-      vx: 0,
-      vy: 0,
+      y: EMERGENCY_TABLE.y + 140,
       facing: 'down',
       isMoving: false,
-      inVent: false,
-      currentVentId: null,
-      role: 'CREW',
-      assignedTasks: [],
-      killCooldown: this.settings.killCooldownSec,
-      emergencyMeetingsLeft: this.settings.emergencyMeetingsPerPlayer
+      thawProgress: 0,
+      immuneFor: 0,
+      tags: 0,
+      rescues: 0
     };
+  }
 
+  public addPlayer(socketId: string, name: string): PlayerPublic {
+    const player = this.createPlayer(socketId, name || `Scientist ${this.players.size + 1}`, false);
     this.players.set(socketId, player);
     this.broadcastState();
     return player;
@@ -142,7 +128,6 @@ export class GameRoom {
     if (this.phase !== 'LOBBY' || this.players.size >= 10) return false;
 
     const botId = `bot_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    const color = this.getAvailableColor();
     const botNames = [
       'Dr. Frost', 'Cmdr. Boreas', 'Bio. Yuki', 'Tech. Blizzard',
       'Spec. Hielo', 'Officer Tundra', 'Geologist Ice', 'Chemist Hail'
@@ -150,30 +135,8 @@ export class GameRoom {
     const usedNames = new Set(Array.from(this.players.values()).map(p => p.name));
     const availableName = botNames.find(n => !usedNames.has(n)) || `Bot ${this.players.size + 1}`;
 
-    const botPlayer: InternalPlayer = {
-      id: botId,
-      name: availableName,
-      colorKey: color.key,
-      colorHex: color.hex,
-      isHost: false,
-      isBot: true,
-      status: 'ALIVE',
-      x: EMERGENCY_TABLE.x,
-      y: EMERGENCY_TABLE.y,
-      vx: 0,
-      vy: 0,
-      facing: 'down',
-      isMoving: false,
-      inVent: false,
-      currentVentId: null,
-      role: 'CREW',
-      assignedTasks: [],
-      killCooldown: this.settings.killCooldownSec,
-      emergencyMeetingsLeft: this.settings.emergencyMeetingsPerPlayer
-    };
-
-    this.players.set(botId, botPlayer);
-    this.bots.set(botId, new BotController(botId));
+    this.players.set(botId, this.createPlayer(botId, availableName, true));
+    this.bots.set(botId, new BotController());
     this.broadcastState();
     return true;
   }
@@ -195,8 +158,10 @@ export class GameRoom {
     const player = this.players.get(socketId);
     if (!player || !player.isHost || this.phase !== 'LOBBY') return false;
 
-    this.settings = { ...this.settings, ...newSettings };
-    this.meetingManager = new MeetingManager(this.settings.discussionSec, this.settings.votingSec);
+    this.settings = {
+      hunterCount: Math.max(1, Math.min(3, Number(newSettings.hunterCount ?? this.settings.hunterCount))),
+      roundSec: Math.max(60, Math.min(300, Number(newSettings.roundSec ?? this.settings.roundSec)))
+    };
     this.broadcastState();
     return true;
   }
@@ -207,81 +172,58 @@ export class GameRoom {
       return { success: false, message: 'Only the host can start the game' };
     }
 
-    if (this.players.size < 4) {
-      return { success: false, message: 'At least 4 players (or bots) required to start' };
+    if (this.players.size < MIN_PLAYERS) {
+      return { success: false, message: `At least ${MIN_PLAYERS} players (or bots) required to start` };
     }
 
     this.phase = 'PLAYING';
     this.winner = null;
     this.winReason = null;
-    this.deadBodies = [];
-    this.chatMessages = [];
-    this.sabotageManager.clearSabotage();
+    this.timeLeft = this.settings.roundSec;
+    this.hunterReleaseIn = HUNTER_RELEASE_SEC;
 
-    // Assign roles randomly
+    // Always leave at least two runners so there is someone to rescue
     const playerArray = Array.from(this.players.values());
     const shuffled = [...playerArray].sort(() => Math.random() - 0.5);
+    const hunterCount = Math.max(1, Math.min(this.settings.hunterCount, playerArray.length - 2));
 
-    const saboteurCount = Math.min(this.settings.saboteurCount, Math.floor(this.players.size / 2));
-    const saboteurIds = new Set<string>();
-
-    for (let i = 0; i < shuffled.length; i++) {
-      if (i < saboteurCount) {
-        shuffled[i].role = 'SABOTEUR';
-        saboteurIds.add(shuffled[i].id);
-      } else {
-        shuffled[i].role = 'CREW';
-      }
-      shuffled[i].status = 'ALIVE';
-      shuffled[i].killCooldown = this.settings.killCooldownSec;
-      shuffled[i].emergencyMeetingsLeft = this.settings.emergencyMeetingsPerPlayer;
-      shuffled[i].inVent = false;
-      shuffled[i].currentVentId = null;
-
-      // Assign 4 tasks to Crew
-      if (shuffled[i].role === 'CREW') {
-        shuffled[i].assignedTasks = TaskManager.generateTasksForPlayer(shuffled[i].id);
-      } else {
-        shuffled[i].assignedTasks = [];
-      }
-    }
-
-    // Position players around the emergency table in a circle
-    const count = playerArray.length;
-    playerArray.forEach((p, idx) => {
-      const angle = (idx / count) * Math.PI * 2;
-      p.x = Math.round(EMERGENCY_TABLE.x + Math.cos(angle) * 140);
-      p.y = Math.round(EMERGENCY_TABLE.y + Math.sin(angle) * 140);
-      p.facing = 'down';
+    // Runners scatter into random rooms; hunters wait around the central table
+    const spawnRooms = ROOMS.filter(r => r.id !== 'mess_hall');
+    let hunterIdx = 0;
+    shuffled.forEach((p, i) => {
+      p.role = i < hunterCount ? 'HUNTER' : 'RUNNER';
+      p.status = 'ALIVE';
+      p.thawProgress = 0;
+      p.immuneFor = 0;
+      p.tags = 0;
+      p.rescues = 0;
       p.isMoving = false;
+      p.facing = 'down';
+
+      if (p.role === 'HUNTER') {
+        const angle = (hunterIdx++ / hunterCount) * Math.PI * 2;
+        p.x = Math.round(EMERGENCY_TABLE.x + Math.cos(angle) * 120);
+        p.y = Math.round(EMERGENCY_TABLE.y + Math.sin(angle) * 120);
+      } else {
+        const room = spawnRooms[Math.floor(Math.random() * spawnRooms.length)];
+        p.x = Math.round(room.x + 60 + Math.random() * (room.width - 120));
+        p.y = Math.round(room.y + 60 + Math.random() * (room.height - 120));
+      }
     });
 
-    // Notify each human player of their role and tasks
-    for (const p of this.players.values()) {
-      if (!p.isBot) {
-        const socket = this.io.sockets.sockets.get(p.id);
-        if (socket) {
-          const fellowSaboteurs = p.role === 'SABOTEUR'
-            ? Array.from(saboteurIds).filter(id => id !== p.id)
-            : [];
-          socket.emit(SOCKET_EVENTS.PLAYER_ROLE, {
-            role: p.role,
-            fellowSaboteurs,
-            tasks: p.assignedTasks
-          });
-        }
-      }
+    for (const bot of this.bots.values()) {
+      bot.reset();
     }
 
     this.broadcastState();
     return { success: true };
   }
 
-  public handlePlayerMove(socketId: string, x: number, y: number, facing: 'left' | 'right' | 'up' | 'down', isMoving: boolean): void {
+  public handlePlayerMove(socketId: string, x: number, y: number, facing: Facing, isMoving: boolean): void {
     if (this.phase !== 'PLAYING') return;
 
     const player = this.players.get(socketId);
-    if (!player || player.status !== 'ALIVE' || player.inVent) return;
+    if (!player || !this.canMove(player)) return;
 
     // Server-authoritative movement validation
     const validated = StationMapServer.validateMovement(player.x, player.y, x, y);
@@ -291,251 +233,9 @@ export class GameRoom {
     player.isMoving = isMoving;
   }
 
-  public handleUseVent(socketId: string, targetVentId?: string): boolean {
-    if (this.phase !== 'PLAYING') return false;
-
-    const player = this.players.get(socketId);
-    if (!player || player.status !== 'ALIVE' || player.role !== 'SABOTEUR') return false;
-
-    if (!player.inVent) {
-      // Enter nearest vent if within interaction distance
-      const nearest = StationMapServer.getNearestVent(player.x, player.y, INTERACTION_DISTANCES.VENT);
-      if (nearest) {
-        player.inVent = true;
-        player.currentVentId = nearest.id;
-        player.x = nearest.x;
-        player.y = nearest.y;
-        this.broadcastState();
-        return true;
-      }
-    } else {
-      // Currently in vent: traverse or exit
-      if (targetVentId) {
-        const currentVent = VENTS.find(v => v.id === player.currentVentId);
-        if (currentVent && currentVent.connectedTo.includes(targetVentId)) {
-          const destVent = VENTS.find(v => v.id === targetVentId);
-          if (destVent) {
-            player.currentVentId = destVent.id;
-            player.x = destVent.x;
-            player.y = destVent.y;
-            this.broadcastState();
-            return true;
-          }
-        }
-      } else {
-        // Exit vent
-        player.inVent = false;
-        player.currentVentId = null;
-        this.broadcastState();
-        return true;
-      }
-    }
-    return false;
-  }
-
-  public handleKill(killerId: string, victimId: string): boolean {
-    if (this.phase !== 'PLAYING') return false;
-
-    const killer = this.players.get(killerId);
-    const victim = this.players.get(victimId);
-
-    if (!killer || killer.status !== 'ALIVE' || killer.role !== 'SABOTEUR' || killer.killCooldown > 0 || killer.inVent) {
-      return false;
-    }
-
-    if (!victim || victim.status !== 'ALIVE' || victim.role === 'SABOTEUR' || victim.inVent) {
-      return false;
-    }
-
-    const dist = Math.hypot(killer.x - victim.x, killer.y - victim.y);
-    if (dist > INTERACTION_DISTANCES.KILL + 35) {
-      return false;
-    }
-
-    // Kill confirmed!
-    victim.status = 'DEAD';
-    killer.killCooldown = this.settings.killCooldownSec;
-
-    // Spawn dead body at victim position
-    const body: DeadBody = {
-      id: `body_${Date.now()}_${victim.id}`,
-      victimId: victim.id,
-      victimName: victim.name,
-      victimColorHex: victim.colorHex,
-      x: victim.x,
-      y: victim.y
-    };
-    this.deadBodies.push(body);
-
-    // Teleport killer to victim position
-    killer.x = victim.x;
-    killer.y = victim.y;
-
-    this.io.to(this.code).emit(SOCKET_EVENTS.KILL_OCCURRED, {
-      killerId: killer.id,
-      victimId: victim.id,
-      body
-    });
-
-    this.checkWinConditions();
-    this.broadcastState();
-    return true;
-  }
-
-  public handleCompleteTask(socketId: string, taskId: string): boolean {
-    if (this.phase !== 'PLAYING') return false;
-
-    const player = this.players.get(socketId);
-    if (!player || player.status !== 'ALIVE' || player.role !== 'CREW') return false;
-
-    const success = TaskManager.validateAndComplete(player.x, player.y, player.assignedTasks, taskId);
-    if (success) {
-      this.checkWinConditions();
-      this.broadcastState();
-      return true;
-    }
-    return false;
-  }
-
-  public handleReportBody(socketId: string, bodyId: string): boolean {
-    if (this.phase !== 'PLAYING') return false;
-
-    const reporter = this.players.get(socketId);
-    if (!reporter || reporter.status !== 'ALIVE') return false;
-
-    const body = this.deadBodies.find(b => b.id === bodyId);
-    if (!body) return false;
-
-    const dist = Math.hypot(reporter.x - body.x, reporter.y - body.y);
-    if (dist > INTERACTION_DISTANCES.REPORT + 40) return false;
-
-    this.startMeeting('body_reported', reporter, body.victimName);
-    return true;
-  }
-
-  public handleEmergency(socketId: string): boolean {
-    if (this.phase !== 'PLAYING') return false;
-
-    const player = this.players.get(socketId);
-    if (!player || player.status !== 'ALIVE' || player.emergencyMeetingsLeft <= 0) return false;
-
-    // Cannot call emergency during active sabotage
-    if (this.sabotageManager.getState().active !== null) return false;
-
-    const dist = Math.hypot(player.x - EMERGENCY_TABLE.x, player.y - EMERGENCY_TABLE.y);
-    if (dist > INTERACTION_DISTANCES.EMERGENCY + 40) return false;
-
-    player.emergencyMeetingsLeft--;
-    this.startMeeting('emergency_button', player);
-    return true;
-  }
-
-  private startMeeting(reason: 'emergency_button' | 'body_reported', reporter: InternalPlayer, victimName?: string): void {
-    this.phase = 'MEETING';
-    this.deadBodies = []; // Clear reported dead bodies from map
-    this.sabotageManager.clearSabotage(); // Clear any sabotage
-
-    // Reset player positions around the emergency table
-    const playerArray = Array.from(this.players.values());
-    const count = playerArray.length;
-    playerArray.forEach((p, idx) => {
-      const angle = (idx / count) * Math.PI * 2;
-      p.x = Math.round(EMERGENCY_TABLE.x + Math.cos(angle) * 140);
-      p.y = Math.round(EMERGENCY_TABLE.y + Math.sin(angle) * 140);
-      p.inVent = false;
-      p.currentVentId = null;
-      p.isMoving = false;
-    });
-
-    // Reset bot controllers for meeting
-    for (const bot of this.bots.values()) {
-      bot.resetForMeeting();
-    }
-
-    const meetingState = this.meetingManager.startMeeting(reason, reporter.id, reporter.name, victimName);
-    this.io.to(this.code).emit(SOCKET_EVENTS.MEETING_STARTED, meetingState);
-    this.broadcastState();
-  }
-
-  public handleChat(socketId: string, text: string): void {
-    if (this.phase !== 'MEETING') return;
-
-    const sender = this.players.get(socketId);
-    if (!sender || !text.trim()) return;
-
-    const msg: ChatMessage = {
-      id: `chat_${Date.now()}_${Math.random()}`,
-      senderId: sender.id,
-      senderName: sender.name,
-      senderColorHex: sender.colorHex,
-      text: text.trim().slice(0, 160),
-      isGhost: sender.status === 'DEAD',
-      timestamp: Date.now()
-    };
-
-    this.chatMessages.push(msg);
-
-    // Filter: if sender is ghost, only send to dead players
-    for (const player of this.players.values()) {
-      if (!player.isBot) {
-        const socket = this.io.sockets.sockets.get(player.id);
-        if (socket) {
-          if (!msg.isGhost || player.status === 'DEAD') {
-            socket.emit(SOCKET_EVENTS.CHAT_MESSAGE, msg);
-          }
-        }
-      }
-    }
-  }
-
-  public handleCastVote(socketId: string, targetId: string): boolean {
-    if (this.phase !== 'MEETING') return false;
-
-    const voter = this.players.get(socketId);
-    if (!voter || voter.status !== 'ALIVE') return false;
-
-    const ok = this.meetingManager.recordVote(socketId, targetId);
-    if (ok) {
-      this.io.to(this.code).emit(SOCKET_EVENTS.VOTE_UPDATE, {
-        voterId: socketId,
-        hasVoted: true
-      });
-      this.broadcastState();
-      return true;
-    }
-    return false;
-  }
-
-  public handleTriggerSabotage(socketId: string, type: 'meltdown' | 'blackout'): boolean {
-    if (this.phase !== 'PLAYING') return false;
-
-    const player = this.players.get(socketId);
-    if (!player || player.status !== 'ALIVE' || player.role !== 'SABOTEUR') return false;
-
-    const ok = this.sabotageManager.trigger(type);
-    if (ok) {
-      this.broadcastState();
-      return true;
-    }
-    return false;
-  }
-
-  public handleFixSabotageStep(
-    socketId: string,
-    fixType: 'meltdown_reactor' | 'meltdown_lifesupport' | 'blackout_switch',
-    switchIndex?: number
-  ): boolean {
-    if (this.phase !== 'PLAYING') return false;
-
-    const player = this.players.get(socketId);
-    if (!player || player.status !== 'ALIVE') return false;
-
-    const ok = this.sabotageManager.applyFixStep(player.x, player.y, fixType, switchIndex);
-    if (ok) {
-      this.broadcastState();
-      return true;
-    }
-    return false;
+  private canMove(p: PlayerPublic): boolean {
+    if (p.status !== 'ALIVE') return false;
+    return p.role === 'RUNNER' || this.hunterReleaseIn <= 0;
   }
 
   public returnToLobby(socketId: string): void {
@@ -545,19 +245,17 @@ export class GameRoom {
     this.phase = 'LOBBY';
     this.winner = null;
     this.winReason = null;
-    this.deadBodies = [];
-    this.chatMessages = [];
-    this.sabotageManager.clearSabotage();
-    this.meetingManager.endMeeting();
+
+    // Drop players who left mid-round
+    for (const [id, p] of this.players.entries()) {
+      if (p.status === 'DISCONNECTED') this.players.delete(id);
+    }
 
     for (const p of this.players.values()) {
       p.status = 'ALIVE';
-      p.role = 'CREW';
-      p.inVent = false;
-      p.currentVentId = null;
-      p.assignedTasks = [];
+      p.role = 'RUNNER';
       p.x = EMERGENCY_TABLE.x;
-      p.y = EMERGENCY_TABLE.y;
+      p.y = EMERGENCY_TABLE.y + 140;
     }
 
     this.broadcastState();
@@ -574,180 +272,106 @@ export class GameRoom {
   }
 
   private tick(deltaSec: number): void {
-    if (this.phase === 'PLAYING') {
-      // 1. Tick kill cooldowns
-      for (const p of this.players.values()) {
-        if (p.role === 'SABOTEUR' && p.killCooldown > 0) {
-          p.killCooldown = Math.max(0, p.killCooldown - deltaSec);
-        }
+    if (this.phase !== 'PLAYING') return;
+
+    this.hunterReleaseIn = Math.max(0, this.hunterReleaseIn - deltaSec);
+    this.timeLeft = Math.max(0, this.timeLeft - deltaSec);
+    if (this.timeLeft <= 0) {
+      this.endGame('RUNNER', 'The clock ran out and the runners survived the cold!');
+      return;
+    }
+
+    for (const p of this.players.values()) {
+      if (p.immuneFor > 0) p.immuneFor = Math.max(0, p.immuneFor - deltaSec);
+    }
+
+    // 1. Bots
+    const everyone = Array.from(this.players.values());
+    for (const [botId, controller] of this.bots.entries()) {
+      const bot = this.players.get(botId);
+      if (!bot || !this.canMove(bot)) {
+        if (bot) bot.isMoving = false;
+        continue;
       }
+      const move = controller.update(bot, everyone, deltaSec);
+      bot.x = move.x;
+      bot.y = move.y;
+      bot.facing = move.facing;
+      bot.isMoving = move.isMoving;
+    }
 
-      // 2. Tick Sabotage
-      this.sabotageManager.updateCooldown(deltaSec);
-      const sabotageResult = this.sabotageManager.tick(deltaSec);
-      if (sabotageResult === 'MELTDOWN_CRITICAL') {
-        this.endGame('SABOTEUR', 'The reactor reached critical meltdown! The station froze and collapsed.');
-        return;
-      }
-
-      // 3. Tick Bots
-      for (const [botId, botController] of this.bots.entries()) {
-        const botPlayer = this.players.get(botId);
-        if (!botPlayer || botPlayer.status !== 'ALIVE') continue;
-
-        // Bot movement and task progress
-        const moveResult = botController.updateMovement(botPlayer, botPlayer.assignedTasks, deltaSec);
-        botPlayer.x = moveResult.newX;
-        botPlayer.y = moveResult.newY;
-        botPlayer.facing = moveResult.facing;
-        botPlayer.isMoving = moveResult.isMoving;
-
-        if (moveResult.completedTaskId) {
-          const task = botPlayer.assignedTasks.find(t => t.id === moveResult.completedTaskId);
-          if (task) task.completed = true;
-          this.checkWinConditions();
-        }
-
-        // Bot body detection and reporting
-        if (botPlayer.role === 'CREW') {
-          for (const body of this.deadBodies) {
-            const dist = Math.hypot(botPlayer.x - body.x, botPlayer.y - body.y);
-            if (dist < 130 && Math.random() < 0.05) {
-              this.startMeeting('body_reported', botPlayer, body.victimName);
-              return;
-            }
-          }
-        } else if (botPlayer.role === 'SABOTEUR' && botPlayer.killCooldown <= 0) {
-          // Bot saboteur kill attempt if isolated
-          for (const target of this.players.values()) {
-            if (target.id !== botId && target.status === 'ALIVE' && target.role === 'CREW') {
-              const dist = Math.hypot(botPlayer.x - target.x, botPlayer.y - target.y);
-              if (dist <= INTERACTION_DISTANCES.KILL) {
-                this.handleKill(botId, target.id);
-                break;
-              }
-            }
-          }
-        }
-      }
-    } else if (this.phase === 'MEETING') {
-      const alivePlayerIds = Array.from(this.players.values())
-        .filter(p => p.status === 'ALIVE')
-        .map(p => p.id);
-
-      const playerMap: Record<string, { name: string; role?: Role }> = {};
-      for (const p of this.players.values()) {
-        playerMap[p.id] = { name: p.name, role: p.role };
-      }
-
-      // Tick bot chats during discussion
-      const meetingState = this.meetingManager.getState();
-      if (meetingState?.phase === 'DISCUSSION') {
-        for (const [botId, botController] of this.bots.entries()) {
-          const botPlayer = this.players.get(botId);
-          if (botPlayer && botPlayer.status === 'ALIVE' && botController.shouldChat()) {
-            const chatText = botController.getRandomChatMessage(meetingState.reporterName, botPlayer.role === 'SABOTEUR');
-            this.handleChat(botId, chatText);
-          }
-        }
-      }
-
-      // Tick bot voting during voting phase
-      if (meetingState?.phase === 'VOTING') {
-        const candidateIds = alivePlayerIds;
-        for (const [botId, botController] of this.bots.entries()) {
-          const botPlayer = this.players.get(botId);
-          if (botPlayer && botPlayer.status === 'ALIVE') {
-            const vote = botController.tickVote(deltaSec, candidateIds.filter(id => id !== botId));
-            if (vote) {
-              this.handleCastVote(botId, vote);
-            }
-          }
-        }
-      }
-
-      const result = this.meetingManager.tick(deltaSec, alivePlayerIds, playerMap);
-
-      if (result.finished) {
-        // Meeting concluded!
-        if (result.ejectedId && result.ejectedId !== 'skip' && result.ejectedId !== 'tie') {
-          const ejectedPlayer = this.players.get(result.ejectedId);
-          if (ejectedPlayer) {
-            ejectedPlayer.status = 'DEAD';
-          }
-        }
-
-        const gameOver = this.checkWinConditions();
-        if (!gameOver) {
-          this.phase = 'PLAYING';
-          // Reset player cooldowns
-          for (const p of this.players.values()) {
-            if (p.role === 'SABOTEUR') {
-              p.killCooldown = this.settings.killCooldownSec;
-            }
+    // 2. Tagging: hunters freeze any runner they touch
+    if (this.hunterReleaseIn <= 0) {
+      for (const hunter of everyone) {
+        if (hunter.role !== 'HUNTER' || hunter.status !== 'ALIVE') continue;
+        for (const runner of everyone) {
+          if (runner.role !== 'RUNNER' || runner.status !== 'ALIVE' || runner.immuneFor > 0) continue;
+          if (Math.hypot(hunter.x - runner.x, hunter.y - runner.y) <= INTERACTION_DISTANCES.TAG) {
+            runner.status = 'FROZEN';
+            runner.isMoving = false;
+            runner.thawProgress = 0;
+            hunter.tags++;
+            this.io.to(this.code).emit(SOCKET_EVENTS.PLAYER_FROZEN, { hunterId: hunter.id, runnerId: runner.id });
           }
         }
       }
     }
 
+    // 3. Thawing: free runners standing next to a frozen teammate melt them out
+    for (const frozen of everyone) {
+      if (frozen.status !== 'FROZEN') continue;
+      const rescuers = everyone.filter(r =>
+        r.role === 'RUNNER' &&
+        r.status === 'ALIVE' &&
+        Math.hypot(r.x - frozen.x, r.y - frozen.y) <= INTERACTION_DISTANCES.THAW
+      );
+
+      if (rescuers.length > 0) {
+        frozen.thawProgress += (deltaSec / THAW_SEC) * rescuers.length;
+      } else {
+        frozen.thawProgress = Math.max(0, frozen.thawProgress - deltaSec / THAW_SEC);
+      }
+
+      if (frozen.thawProgress >= 1) {
+        frozen.status = 'ALIVE';
+        frozen.thawProgress = 0;
+        frozen.immuneFor = THAW_IMMUNITY_SEC;
+        rescuers.forEach(r => r.rescues++);
+        this.io.to(this.code).emit(SOCKET_EVENTS.PLAYER_THAWED, { runnerId: frozen.id, rescuerIds: rescuers.map(r => r.id) });
+      }
+    }
+
+    if (this.checkWinConditions()) return;
     this.broadcastState();
   }
 
   private checkWinConditions(): boolean {
-    if (this.phase !== 'PLAYING' && this.phase !== 'MEETING') return false;
+    if (this.phase !== 'PLAYING') return false;
 
-    let aliveCrew = 0;
-    let aliveSaboteurs = 0;
-    let totalCrewTasks = 0;
-    let completedCrewTasks = 0;
-
+    let freeRunners = 0;
+    let activeHunters = 0;
     for (const p of this.players.values()) {
-      if (p.role === 'CREW') {
-        totalCrewTasks += p.assignedTasks.length;
-        completedCrewTasks += p.assignedTasks.filter(t => t.completed).length;
-        if (p.status === 'ALIVE') aliveCrew++;
-      } else if (p.role === 'SABOTEUR') {
-        if (p.status === 'ALIVE') aliveSaboteurs++;
-      }
+      if (p.role === 'RUNNER' && p.status === 'ALIVE') freeRunners++;
+      if (p.role === 'HUNTER' && p.status !== 'DISCONNECTED') activeHunters++;
     }
 
-    // 1. Crew wins if all saboteurs are dead/ejected
-    if (aliveSaboteurs === 0) {
-      this.endGame('CREW', 'All Saboteurs have been ejected! The station is secured.');
+    if (activeHunters === 0) {
+      this.endGame('RUNNER', 'The hunters fled the station. Runners win!');
       return true;
     }
 
-    // 2. Saboteurs win if alive Saboteurs >= alive Crew
-    if (aliveSaboteurs >= aliveCrew) {
-      this.endGame('SABOTEUR', 'The Saboteurs have overwhelmed the crew! The outpost is lost.');
-      return true;
-    }
-
-    // 3. Crew wins if all tasks are 100% completed
-    if (totalCrewTasks > 0 && completedCrewTasks >= totalCrewTasks) {
-      this.endGame('CREW', 'All station maintenance tasks completed! The outpost is saved.');
+    if (freeRunners === 0) {
+      this.endGame('HUNTER', 'Every runner is frozen solid. The frost hunters win!');
       return true;
     }
 
     return false;
   }
 
-  private endGame(winner: 'CREW' | 'SABOTEUR', reason: string): void {
+  private endGame(winner: Role, reason: string): void {
     this.phase = 'ENDED';
     this.winner = winner;
     this.winReason = reason;
-
-    this.io.to(this.code).emit(SOCKET_EVENTS.GAME_OVER, {
-      winner,
-      reason,
-      players: Array.from(this.players.values()).map(p => ({
-        id: p.id,
-        name: p.name,
-        role: p.role,
-        colorHex: p.colorHex
-      }))
-    });
-
     this.broadcastState();
   }
 
@@ -758,49 +382,17 @@ export class GameRoom {
   }
 
   private broadcastState(): void {
-    let totalTasks = 0;
-    let completedTasks = 0;
-    for (const p of this.players.values()) {
-      if (p.role === 'CREW') {
-        totalTasks += p.assignedTasks.length;
-        completedTasks += p.assignedTasks.filter(t => t.completed).length;
-      }
-    }
-
-    // Prepare public players list
-    const publicPlayers: Record<string, PlayerPublic> = {};
+    const players: Record<string, PlayerPublic> = {};
     for (const [id, p] of this.players.entries()) {
-      publicPlayers[id] = {
-        id: p.id,
-        name: p.name,
-        colorKey: p.colorKey,
-        colorHex: p.colorHex,
-        isHost: p.isHost,
-        isBot: p.isBot,
-        status: p.status,
-        x: p.x,
-        y: p.y,
-        vx: p.vx,
-        vy: p.vy,
-        facing: p.facing,
-        isMoving: p.isMoving,
-        inVent: p.inVent,
-        // Role is hidden during play, unless ended
-        role: this.phase === 'ENDED' ? p.role : undefined,
-        killCooldown: p.killCooldown,
-        emergencyMeetingsLeft: p.emergencyMeetingsLeft
-      };
+      players[id] = { ...p };
     }
 
     const snapshot: GameStateSnapshot = {
       roomCode: this.code,
       phase: this.phase,
-      players: publicPlayers,
-      tasksTotal: totalTasks,
-      tasksCompleted: completedTasks,
-      deadBodies: this.deadBodies,
-      sabotage: this.sabotageManager.getState(),
-      meeting: this.meetingManager.getState(),
+      players,
+      timeLeft: this.timeLeft,
+      hunterReleaseIn: this.hunterReleaseIn,
       winner: this.winner,
       winReason: this.winReason,
       settings: this.settings
