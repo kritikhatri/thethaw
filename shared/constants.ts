@@ -23,6 +23,15 @@ export const HUNTER_RELEASE_SEC = 4;
 export const THAW_SEC = 2;
 export const THAW_IMMUNITY_SEC = 2.5;
 
+export const POWER_UPS = {
+  SPAWN_SEC: 8,
+  MAX_ON_MAP: 4,
+  PICKUP_DISTANCE: 40,
+  BOOST_SEC: 5,
+  BOOST_MULTIPLIER: 1.35,
+  SHIELD_SEC: 5
+};
+
 export const SPEED = {
   RUNNER: 200,
   HUNTER: 215
@@ -112,5 +121,6 @@ export const SOCKET_EVENTS = {
   ERROR_MSG: 'error_msg',
   GAME_STATE_UPDATE: 'game_state_update',
   PLAYER_FROZEN: 'player_frozen',
-  PLAYER_THAWED: 'player_thawed'
+  PLAYER_THAWED: 'player_thawed',
+  POWER_UP_TAKEN: 'power_up_taken'
 };

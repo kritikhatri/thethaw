@@ -1,4 +1,5 @@
-import { Facing, PlayerPublic } from '../../shared/types.js';
+import { Facing, PlayerPublic, PowerUp } from '../../shared/types.js';
+import { POWER_UPS } from '../../shared/constants.js';
 import { StationMapServer } from './StationMapServer.js';
 
 interface BotPathNode {
@@ -39,16 +40,19 @@ const ROOM_NODES = ['mess_hall', 'cryo_lab', 'medbay', 'reactor', 'storage', 'en
 const BOT_SPEED = { RUNNER: 180, HUNTER: 190 };
 const FLEE_RADIUS = 280;
 const REPLAN_SEC = 0.4;
+const POWER_UP_SEEK_RADIUS = 300;
 
 export class BotController {
   private path: Point[] = [];
+  private pathEndNodeId: string | null = null;
   private replanTimer = 0;
   private wanderNodeId: string = ROOM_NODES[0];
-  // Some bots are heroes who rush to thaw teammates, others play it safe
-  private bravery = 0.4 + Math.random() * 0.6;
+  // Most bots rush to thaw teammates, a few play it safe. Fixed per bot so a rescue isn't abandoned midway
+  private isRescuer = Math.random() < 0.75;
 
   public reset(): void {
     this.path = [];
+    this.pathEndNodeId = null;
     this.replanTimer = 0;
     this.pickWanderNode();
   }
@@ -56,13 +60,21 @@ export class BotController {
   public update(
     bot: PlayerPublic,
     everyone: PlayerPublic[],
+    powerUps: PowerUp[],
     deltaSec: number
   ): { x: number; y: number; isMoving: boolean; facing: Facing } {
     this.replanTimer -= deltaSec;
     if (this.replanTimer <= 0) {
       this.replanTimer = REPLAN_SEC;
-      const goal = bot.role === 'HUNTER' ? this.hunterGoal(bot, everyone) : this.runnerGoal(bot, everyone);
-      this.path = this.planPath(bot, goal);
+      const goal = bot.role === 'HUNTER' ? this.hunterGoal(bot, everyone, powerUps) : this.runnerGoal(bot, everyone, powerUps);
+      const endNode = this.nearestNode(goal);
+      if (this.path.length > 0 && endNode.id === this.pathEndNodeId) {
+        // Same destination: stay on the current route so we don't bounce between waypoints
+        this.path[this.path.length - 1] = { x: goal.x, y: goal.y };
+      } else {
+        this.pathEndNodeId = endNode.id;
+        this.path = this.planPath(bot, goal);
+      }
     }
 
     let target = this.path[0];
@@ -80,7 +92,8 @@ export class BotController {
     const dx = target.x - bot.x;
     const dy = target.y - bot.y;
     const dist = Math.hypot(dx, dy);
-    const step = Math.min(dist, BOT_SPEED[bot.role] * deltaSec);
+    const speed = BOT_SPEED[bot.role] * (bot.boostFor > 0 ? POWER_UPS.BOOST_MULTIPLIER : 1);
+    const step = Math.min(dist, speed * deltaSec);
     const moved = StationMapServer.validateMovement(bot.x, bot.y, bot.x + (dx / dist) * step, bot.y + (dy / dist) * step);
 
     const facing: Facing = Math.abs(dx) > Math.abs(dy)
@@ -90,21 +103,33 @@ export class BotController {
     return { x: moved.x, y: moved.y, isMoving: true, facing };
   }
 
-  private hunterGoal(bot: PlayerPublic, everyone: PlayerPublic[]): Point {
+  private nearbyPowerUp(bot: PlayerPublic, powerUps: PowerUp[]): PowerUp | null {
+    const usable = powerUps.filter(p => p.type === 'boost' || bot.role === 'RUNNER');
+    const closest = this.nearest(bot, usable);
+    return closest && Math.hypot(closest.x - bot.x, closest.y - bot.y) < POWER_UP_SEEK_RADIUS ? closest : null;
+  }
+
+  private hunterGoal(bot: PlayerPublic, everyone: PlayerPublic[], powerUps: PowerUp[]): Point {
     const prey = this.nearest(bot, everyone.filter(p =>
       p.role === 'RUNNER' && p.status === 'ALIVE' && p.immuneFor <= 0
     ));
+    const powerUp = this.nearbyPowerUp(bot, powerUps);
+    if (powerUp) return powerUp;
+
     return prey ?? this.wanderPoint(bot);
   }
 
-  private runnerGoal(bot: PlayerPublic, everyone: PlayerPublic[]): Point {
+  private runnerGoal(bot: PlayerPublic, everyone: PlayerPublic[], powerUps: PowerUp[]): Point {
     const hunter = this.nearest(bot, everyone.filter(p => p.role === 'HUNTER' && p.status === 'ALIVE'));
     if (hunter && Math.hypot(hunter.x - bot.x, hunter.y - bot.y) < FLEE_RADIUS) {
       return this.fleePoint(bot, hunter);
     }
 
+    const powerUp = this.nearbyPowerUp(bot, powerUps);
+    if (powerUp) return powerUp;
+
     const frozen = this.nearest(bot, everyone.filter(p => p.status === 'FROZEN'));
-    if (frozen && Math.random() < this.bravery) {
+    if (frozen && this.isRescuer) {
       return frozen;
     }
 
@@ -154,7 +179,10 @@ export class BotController {
   }
 
   private nearestNode(p: Point): BotPathNode {
-    return this.nearest(p, Object.values(STATION_WAYPOINTS))!;
+    // Prefer a node we can walk straight to, so a node behind a wall never wins on distance alone
+    const nodes = Object.values(STATION_WAYPOINTS);
+    const reachable = nodes.filter(n => StationMapServer.hasClearPath(p.x, p.y, n.x, n.y));
+    return this.nearest(p, reachable.length > 0 ? reachable : nodes)!;
   }
 
   /**
@@ -187,7 +215,8 @@ export class BotController {
     // Skip the first node if we're already past it on the way to the second
     if (points.length > 1) {
       const [first, second] = points;
-      if (Math.hypot(second.x - bot.x, second.y - bot.y) < Math.hypot(second.x - first.x, second.y - first.y)) {
+      const closerToSecond = Math.hypot(second.x - bot.x, second.y - bot.y) < Math.hypot(second.x - first.x, second.y - first.y);
+      if (closerToSecond && StationMapServer.hasClearPath(bot.x, bot.y, second.x, second.y)) {
         points.shift();
       }
     }

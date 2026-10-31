@@ -28,18 +28,34 @@ export class StationMapServer {
     }
 
     // Check if inside any corridor
+    // Corridor ends open into rooms, so only the side walls keep the radius margin
     for (const corridor of CORRIDORS) {
+      const isHorizontal = corridor.width > corridor.height;
+      const marginX = isHorizontal ? 0 : r;
+      const marginY = isHorizontal ? r : 0;
       if (
-        x >= corridor.x + r &&
-        x <= corridor.x + corridor.width - r &&
-        y >= corridor.y + r &&
-        y <= corridor.y + corridor.height - r
+        x >= corridor.x + marginX &&
+        x <= corridor.x + corridor.width - marginX &&
+        y >= corridor.y + marginY &&
+        y <= corridor.y + corridor.height - marginY
       ) {
         return true;
       }
     }
 
     return false;
+  }
+
+  /**
+   * Check that a straight walk between two points stays on walkable ground
+   */
+  public static hasClearPath(fromX: number, fromY: number, toX: number, toY: number): boolean {
+    const steps = Math.ceil(Math.hypot(toX - fromX, toY - fromY) / 12);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      if (!this.isWalkable(fromX + (toX - fromX) * t, fromY + (toY - fromY) * t)) return false;
+    }
+    return true;
   }
 
   /**

@@ -5,6 +5,7 @@ import {
   GameSettings,
   GameStateSnapshot,
   PlayerPublic,
+  PowerUp,
   Role
 } from '../../shared/types.js';
 import {
@@ -14,6 +15,7 @@ import {
   HUNTER_RELEASE_SEC,
   INTERACTION_DISTANCES,
   MIN_PLAYERS,
+  POWER_UPS,
   ROOMS,
   SOCKET_EVENTS,
   THAW_IMMUNITY_SEC,
@@ -31,6 +33,8 @@ export class GameRoom {
   private settings: GameSettings = { ...DEFAULT_SETTINGS };
   private timeLeft: number = 0;
   private hunterReleaseIn: number = 0;
+  private powerUps: PowerUp[] = [];
+  private powerUpTimer: number = 0;
   private winner: Role | null = null;
   private winReason: string | null = null;
 
@@ -73,6 +77,7 @@ export class GameRoom {
       isMoving: false,
       thawProgress: 0,
       immuneFor: 0,
+      boostFor: 0,
       tags: 0,
       rescues: 0
     };
@@ -181,6 +186,8 @@ export class GameRoom {
     this.winReason = null;
     this.timeLeft = this.settings.roundSec;
     this.hunterReleaseIn = HUNTER_RELEASE_SEC;
+    this.powerUps = [];
+    this.powerUpTimer = POWER_UPS.SPAWN_SEC;
 
     // Always leave at least two runners so there is someone to rescue
     const playerArray = Array.from(this.players.values());
@@ -195,6 +202,7 @@ export class GameRoom {
       p.status = 'ALIVE';
       p.thawProgress = 0;
       p.immuneFor = 0;
+      p.boostFor = 0;
       p.tags = 0;
       p.rescues = 0;
       p.isMoving = false;
@@ -245,6 +253,7 @@ export class GameRoom {
     this.phase = 'LOBBY';
     this.winner = null;
     this.winReason = null;
+    this.powerUps = [];
 
     // Drop players who left mid-round
     for (const [id, p] of this.players.entries()) {
@@ -283,6 +292,7 @@ export class GameRoom {
 
     for (const p of this.players.values()) {
       if (p.immuneFor > 0) p.immuneFor = Math.max(0, p.immuneFor - deltaSec);
+      if (p.boostFor > 0) p.boostFor = Math.max(0, p.boostFor - deltaSec);
     }
 
     // 1. Bots
@@ -293,12 +303,14 @@ export class GameRoom {
         if (bot) bot.isMoving = false;
         continue;
       }
-      const move = controller.update(bot, everyone, deltaSec);
+      const move = controller.update(bot, everyone, this.powerUps, deltaSec);
       bot.x = move.x;
       bot.y = move.y;
       bot.facing = move.facing;
       bot.isMoving = move.isMoving;
     }
+
+    this.updatePowerUps(deltaSec, everyone);
 
     // 2. Tagging: hunters freeze any runner they touch
     if (this.hunterReleaseIn <= 0) {
@@ -343,6 +355,50 @@ export class GameRoom {
 
     if (this.checkWinConditions()) return;
     this.broadcastState();
+  }
+
+  private updatePowerUps(deltaSec: number, everyone: PlayerPublic[]): void {
+    this.powerUpTimer -= deltaSec;
+    if (this.powerUpTimer <= 0) {
+      this.powerUpTimer = POWER_UPS.SPAWN_SEC;
+      if (this.powerUps.length < POWER_UPS.MAX_ON_MAP) this.spawnPowerUp();
+    }
+
+    this.powerUps = this.powerUps.filter(powerUp => {
+      const taker = everyone.find(p =>
+        p.status === 'ALIVE' &&
+        // Shields only protect runners, so hunters leave them on the floor
+        (powerUp.type === 'boost' || p.role === 'RUNNER') &&
+        Math.hypot(p.x - powerUp.x, p.y - powerUp.y) <= POWER_UPS.PICKUP_DISTANCE
+      );
+      if (!taker) return true;
+
+      if (powerUp.type === 'boost') {
+        taker.boostFor = POWER_UPS.BOOST_SEC;
+      } else {
+        taker.immuneFor = Math.max(taker.immuneFor, POWER_UPS.SHIELD_SEC);
+      }
+      this.io.to(this.code).emit(SOCKET_EVENTS.POWER_UP_TAKEN, { playerId: taker.id, type: powerUp.type });
+      return false;
+    });
+  }
+
+  private spawnPowerUp(): void {
+    // Retry because a random point can land on the central table
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const room = ROOMS[Math.floor(Math.random() * ROOMS.length)];
+      const x = Math.round(room.x + 50 + Math.random() * (room.width - 100));
+      const y = Math.round(room.y + 50 + Math.random() * (room.height - 100));
+      if (StationMapServer.isWalkable(x, y)) {
+        this.powerUps.push({
+          id: `power_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          type: Math.random() < 0.5 ? 'boost' : 'shield',
+          x,
+          y
+        });
+        return;
+      }
+    }
   }
 
   private checkWinConditions(): boolean {
@@ -393,6 +449,7 @@ export class GameRoom {
       players,
       timeLeft: this.timeLeft,
       hunterReleaseIn: this.hunterReleaseIn,
+      powerUps: this.powerUps,
       winner: this.winner,
       winReason: this.winReason,
       settings: this.settings

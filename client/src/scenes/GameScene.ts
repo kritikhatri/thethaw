@@ -5,6 +5,7 @@ import {
   EMERGENCY_TABLE,
   MAP_HEIGHT,
   MAP_WIDTH,
+  POWER_UPS,
   ROOMS,
   SOCKET_EVENTS,
   SPEED,
@@ -42,6 +43,7 @@ export class GameScene extends Phaser.Scene {
   };
 
   private playerVisuals: Map<string, PlayerVisual> = new Map();
+  private powerUpSprites: Map<string, Phaser.GameObjects.Image> = new Map();
 
   private localX: number = EMERGENCY_TABLE.x;
   private localY: number = EMERGENCY_TABLE.y;
@@ -67,6 +69,7 @@ export class GameScene extends Phaser.Scene {
     this.latestSnapshot = data.snapshot;
     this.myPlayerId = data.myPlayerId;
     this.playerVisuals = new Map();
+    this.powerUpSprites = new Map();
     this.wasReleased = false;
     const me = data.snapshot.players[data.myPlayerId];
     if (me) {
@@ -150,6 +153,7 @@ export class GameScene extends Phaser.Scene {
     this.socket.off(SOCKET_EVENTS.GAME_STATE_UPDATE);
     this.socket.off(SOCKET_EVENTS.PLAYER_FROZEN);
     this.socket.off(SOCKET_EVENTS.PLAYER_THAWED);
+    this.socket.off(SOCKET_EVENTS.POWER_UP_TAKEN);
 
     this.socket.on(SOCKET_EVENTS.GAME_STATE_UPDATE, (snapshot: GameStateSnapshot) => {
       this.latestSnapshot = snapshot;
@@ -190,6 +194,43 @@ export class GameScene extends Phaser.Scene {
       }
       this.burstAt(runnerId, 0x4ade80);
     });
+
+    this.socket.on(SOCKET_EVENTS.POWER_UP_TAKEN, ({ playerId, type }) => {
+      this.burstAt(playerId, type === 'boost' ? 0xfb923c : 0xfacc15);
+      if (playerId === this.myPlayerId) {
+        SoundSynthesizer.playTaskComplete();
+        if (type === 'boost') {
+          this.hudOverlay.showBanner('HEAT BOOST!', '#fb923c', 900);
+        } else {
+          this.hudOverlay.showBanner('SHIELD UP!', '#facc15', 900);
+        }
+      }
+    });
+  }
+
+  private syncPowerUps(): void {
+    const powerUps = this.latestSnapshot?.powerUps ?? [];
+    const liveIds = new Set(powerUps.map(p => p.id));
+    for (const [id, sprite] of this.powerUpSprites.entries()) {
+      if (!liveIds.has(id)) {
+        sprite.destroy();
+        this.powerUpSprites.delete(id);
+      }
+    }
+    for (const powerUp of powerUps) {
+      if (this.powerUpSprites.has(powerUp.id)) continue;
+      const sprite = this.add.image(powerUp.x, powerUp.y, `power_${powerUp.type}`);
+      sprite.setDepth(15);
+      this.tweens.add({
+        targets: sprite,
+        y: powerUp.y - 6,
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+      this.powerUpSprites.set(powerUp.id, sprite);
+    }
   }
 
   private burstAt(playerId: string, tint: number): void {
@@ -276,6 +317,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.latestSnapshot) return;
 
     this.handlePlayerInput(delta);
+    this.syncPowerUps();
     this.updatePlayerVisuals(delta);
     this.updateFogOfWar();
     this.updateFrostEffect(delta);
@@ -306,7 +348,8 @@ export class GameScene extends Phaser.Scene {
 
     if (isMoving) {
       const len = Math.hypot(dx, dy);
-      const step = (SPEED[me.role] * delta) / 1000;
+      const speed = SPEED[me.role] * (me.boostFor > 0 ? POWER_UPS.BOOST_MULTIPLIER : 1);
+      const step = (speed * delta) / 1000;
 
       this.localX = Math.max(30, Math.min(MAP_WIDTH - 30, this.localX + (dx / len) * step));
       this.localY = Math.max(30, Math.min(MAP_HEIGHT - 30, this.localY + (dy / len) * step));

@@ -119,13 +119,13 @@ export class LobbyScene extends Phaser.Scene {
           
           <!-- Name Input -->
           <div style="margin-bottom:18px;">
-            <label style="display:block; font-size:12px; font-weight:bold; color:#94a3b8; letter-spacing:1px; margin-bottom:6px;">RESEARCHER NAME</label>
+            <label style="display:block; font-size:12px; font-weight:bold; color:#94a3b8; letter-spacing:1px; margin-bottom:6px;">YOUR NAME</label>
             <input id="input-name" type="text" maxlength="16" value="${savedName}" style="width:100%; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:10px 14px; color:#f8fafc; font-size:15px; font-weight:600; outline:none; box-sizing:border-box;" />
           </div>
 
           <!-- Color Palette Picker -->
           <div style="margin-bottom:22px;">
-            <label style="display:block; font-size:12px; font-weight:bold; color:#94a3b8; letter-spacing:1px; margin-bottom:8px;">EXPEDITION SUIT COLOR</label>
+            <label style="display:block; font-size:12px; font-weight:bold; color:#94a3b8; letter-spacing:1px; margin-bottom:8px;">SUIT COLOR</label>
             <div id="palette-grid" style="display:grid; grid-template-columns:repeat(5, 1fr); gap:10px;">
             </div>
           </div>
@@ -133,7 +133,7 @@ export class LobbyScene extends Phaser.Scene {
           <!-- Buttons -->
           <div style="display:flex; flex-direction:column; gap:12px;">
             <button id="btn-create" style="width:100%; background:linear-gradient(135deg, #0284c7, #0369a1); color:#ffffff; border:none; border-radius:8px; padding:12px; font-size:15px; font-weight:bold; letter-spacing:1px; cursor:pointer; box-shadow:0 0 15px rgba(2, 132, 199, 0.5); transition:transform 0.1s ease;">
-              ESTABLISH NEW EXPEDITION
+              CREATE GAME
             </button>
 
             <div style="display:flex; align-items:center; gap:8px; margin:4px 0;">
@@ -223,7 +223,7 @@ export class LobbyScene extends Phaser.Scene {
           <!-- Top Bar: Room Code & Status -->
           <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #334155; padding-bottom:14px; margin-bottom:18px;">
             <div>
-              <div style="color:#94a3b8; font-size:12px; font-weight:bold; letter-spacing:1px;">EXPEDITION CODE</div>
+              <div style="color:#94a3b8; font-size:12px; font-weight:bold; letter-spacing:1px;">ROOM CODE</div>
               <div style="display:flex; align-items:center; gap:10px; margin-top:2px;">
                 <span id="room-code-display" style="font-size:26px; font-family:monospace; font-weight:900; color:#38bdf8; letter-spacing:3px;">${snapshot.roomCode}</span>
                 <button id="btn-copy" style="background:#1e293b; border:1px solid #38bdf8; color:#bae6fd; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:bold; cursor:pointer;">COPY</button>
@@ -231,7 +231,7 @@ export class LobbyScene extends Phaser.Scene {
             </div>
 
             <div style="text-align:right;">
-              <div style="color:#94a3b8; font-size:12px; font-weight:bold; letter-spacing:1px;">SCIENTISTS ASSEMBLED</div>
+              <div style="color:#94a3b8; font-size:12px; font-weight:bold; letter-spacing:1px;">PLAYERS</div>
               <div style="font-size:20px; font-weight:bold; color:${playerCount >= MIN_PLAYERS ? '#4ade80' : '#facc15'}; margin-top:2px;">
                 ${playerCount} / 10
               </div>
@@ -246,7 +246,7 @@ export class LobbyScene extends Phaser.Scene {
 
           <!-- Players Grid -->
           <div style="margin-bottom:20px;">
-            <div style="font-size:12px; font-weight:bold; color:#94a3b8; margin-bottom:8px;">CREW MANIFEST:</div>
+            <div style="font-size:12px; font-weight:bold; color:#94a3b8; margin-bottom:8px;">PLAYERS IN ROOM:</div>
             <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px; max-height:200px; overflow-y:auto; padding-right:4px;">
               ${playersList.map(p => `
                 <div style="background:#1e293b; border:1px solid ${p.id === this.myPlayerId ? '#38bdf8' : '#334155'}; border-radius:8px; padding:10px; display:flex; align-items:center; gap:10px;">
@@ -275,7 +275,7 @@ export class LobbyScene extends Phaser.Scene {
               <!-- Solo Bots option -->
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
-                  <div style="font-size:13px; color:#e2e8f0; font-weight:bold;">Solo Testing AI Bots:</div>
+                  <div style="font-size:13px; color:#e2e8f0; font-weight:bold;">AI Bots:</div>
                   <div style="font-size:11px; color:#64748b;">Add AI players that chase, flee and rescue.</div>
                 </div>
                 <div style="display:flex; gap:6px;">
@@ -286,14 +286,14 @@ export class LobbyScene extends Phaser.Scene {
             </div>
           ` : `
             <div style="text-align:center; color:#94a3b8; font-size:13px; margin-bottom:18px; font-style:italic;">
-              Waiting for the Expedition Leader to launch...
+              Waiting for the host to start...
             </div>
           `}
 
           <!-- Start Game Button -->
           ${isHost ? `
             <button id="btn-start" ${!canStart ? 'disabled' : ''} style="width:100%; background:${canStart ? 'linear-gradient(135deg, #16a34a, #15803d)' : '#334155'}; color:#ffffff; border:none; border-radius:8px; padding:14px; font-size:16px; font-weight:900; letter-spacing:1px; cursor:${canStart ? 'pointer' : 'default'}; box-shadow:${canStart ? '0 0 20px rgba(34, 197, 94, 0.5)' : 'none'};">
-              ${canStart ? 'LAUNCH EXPEDITION' : `NEED AT LEAST ${MIN_PLAYERS} PLAYERS (${playerCount}/${MIN_PLAYERS})`}
+              ${canStart ? 'START GAME' : `NEED AT LEAST ${MIN_PLAYERS} PLAYERS (${playerCount}/${MIN_PLAYERS})`}
             </button>
           ` : ''}
 

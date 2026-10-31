@@ -20,9 +20,19 @@ export interface PlayerPublic {
   facing: Facing;
   isMoving: boolean;
   thawProgress: number; // 0..1 while teammates are thawing this frozen runner
-  immuneFor: number; // seconds of tag immunity left after being thawed
+  immuneFor: number; // seconds of tag immunity left (after a thaw or from a shield)
+  boostFor: number; // seconds of Heat Boost left
   tags: number;
   rescues: number;
+}
+
+export type PowerUpType = 'boost' | 'shield';
+
+export interface PowerUp {
+  id: string;
+  type: PowerUpType;
+  x: number;
+  y: number;
 }
 
 export interface GameSettings {
@@ -52,6 +62,7 @@ export interface GameStateSnapshot {
   players: Record<string, PlayerPublic>;
   timeLeft: number;
   hunterReleaseIn: number; // countdown before hunters may move
+  powerUps: PowerUp[];
   winner: Role | null;
   winReason: string | null;
   settings: GameSettings;

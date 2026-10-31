@@ -15,6 +15,34 @@ export class ProceduralGraphics {
    * Snowflake particle and soft glow used for ambient effects
    */
   private static createAtmosphereTextures(scene: Phaser.Scene): void {
+    const powerUps = [
+      { key: 'power_boost', color: '#fb923c', symbol: '»' },
+      { key: 'power_shield', color: '#facc15', symbol: '◆' }
+    ];
+    powerUps.forEach(({ key, color, symbol }) => {
+      if (scene.textures.exists(key)) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = 44;
+      canvas.height = 44;
+      const ctx = canvas.getContext('2d')!;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#0f172a';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(22, 22, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = color;
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(symbol, 22, 22);
+      scene.textures.addCanvas(key, canvas);
+    });
+
     if (!scene.textures.exists('snowflake')) {
       const canvas = document.createElement('canvas');
       canvas.width = 8;
